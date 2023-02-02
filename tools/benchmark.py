@@ -1,53 +1,62 @@
-# Vio tracker benchmark library
+#!/usr/bin/env python3
+""" VIO benchmarking library. """
 
 import argparse
-import sys
+from collections import OrderedDict
 from datetime import datetime
 import time
 import subprocess
 import os
-from pathlib import Path
+import pathlib
 import json
 from collections import deque
-from .compute_metrics import compute_metrics
-from .draw_slam_maps import draw_slam_maps
-from .utils import GpsToLocalConverter
 import concurrent.futures
 from functools import partial
 import multiprocessing
-import traceback
-import math
-import socket
-import re
 
+from .utils import GpsToLocalConverter
+from .compute_metrics import computeMetrics, Metric
+from .plot import makeAllPlots, getFigurePath
+
+import numpy as np
 
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
+DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_METRICS = ",".join([
+    Metric.PIECEWISE.value,
+    Metric.FULL_3D.value,
+])
+
+# Can be enabled to get postprocessed and real-time tracks plot in the same figures.
+# Usually it gets too cluttered to make sense of.
+COMPARE_POSTPROCESSED = False
+
+# Will be printed to VIO logs.
+CPU_TIME_MESSAGE = "CPU time (user sys percent)"
 
 def getArgParser():
-    parser = argparse.ArgumentParser(description="Benchmark runner script")
-    parser.add_argument("tags", help="Benchmark case", nargs='?', default=None)
-    parser.add_argument("-output", help="Output directory for benchmark", default="output")
-    parser.add_argument("-dir", help="Directory of benchmark data folders", default="data/benchmark")
-    parser.add_argument("-set", help="Run a benchmark set")
-    parser.add_argument("-setDir", help="An additional directory to search for benchmark set")
-    parser.add_argument("-params", help="Parameters as a string ie. '-params \"-displayVideo=true -v=1\"' for example")
+    allMetrics = [m.value for m in list(Metric)]
+
+    parser = argparse.ArgumentParser(__doc__)
+    parser.add_argument("-output", help="Output parent directory", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("-rootDataDir", help="Paths in benchmark sets are given relative to this directory", default="data/benchmark")
+    parser.add_argument("-set", help="Path to JSON description of benchmark set to run")
+    parser.add_argument("-dataDir", help="Run all datasets in this directory. Ignores `-rootDataDir`")
+    parser.add_argument("-setDir", help="An additional directory to search for benchmark set", default="../sets")
+    parser.add_argument("-recordingDir", help="Path to a single benchmark recording to run. Ignores `-rootDataDir`")
+    parser.add_argument("-params", help="Parameters as a string, eg '-params \"-useStereo=false -v=1\"'")
     parser.add_argument("-threads", help="How many CPU threads to use for running benchmarks", default=6)
-    parser.add_argument("-runId", help="Run ID for the benchmark")
-    parser.add_argument("-parallelBenchmark", help="", action="store_true")
-    parser.add_argument("-rotateCases", help="", action="store_true")
-    parser.add_argument("-groundTruth", help="Ground truth csv file", default="ground-truth.csv")
-    parser.add_argument("-skipAggregate", help="Skips aggregated benchmark. Good for running serveral benchmarks in parallel", action="store_true")
-    parser.add_argument("-skipBenchmark", help="Skips running benchmark and only aggregates existing ones", action="store_true")
-    parser.add_argument("-distributedBatchSize", help="Defines total number of batches i.e. how many worker nodes there are")
-    parser.add_argument("-distributedBatchNumber", help="Defines number of this batch, only benchmarks belonging to this batch number are ran with formula: X %% distributedBatchSize == distributedBatchNumber")
-    parser.add_argument("-testDeterministic", help="Assumes test set has N identical tests and runs diff on output log", action="store_true")
-    parser.add_argument("-compare", help="Comma separated list of comparison datasets: arengine,arkit,arcore,groundtruth,ondevice")
-    parser.add_argument("-piecewise", help="When enabled visualize piecewise track", action="store_true")
+    parser.add_argument("-runId", help="Output folder name. If unset will use timestamp")
+    parser.add_argument("-skipBenchmark", help="Skips running benchmark and only aggregates existing ones. For development use.", action="store_true")
     parser.add_argument("-offsetTracks", help="When enabled, tracks are stacked instead of overlaid", action="store_true")
-    parser.add_argument('-metricSet', type=str, default='default', choices={'default', 'xy_only', 'full_2d_align', 'full_3d_align', 'full_sim3'})
-    parser.add_argument("-displayHostname", help="When enabled, each benchmark metrics show machine hostname", action="store_true")
-    parser.add_argument("-exportAlignedData", help="Exports aligned data to 'aligned' folder", action="store_true")
+    parser.add_argument('-metricSet', type=str, default=DEFAULT_METRICS,
+            help="One or more metric kinds, joined by comma, selected from: {}".format(", ".join(allMetrics)))
+    parser.add_argument("-methodName", default="VIO", help="Name of the VIO method being benchmarked")
+    parser.add_argument("-gitDir", help="Subfolder that should be used for saving git stats")
+    parser.add_argument("-gitBranchName", help="Written to info.json")
+    parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
+    parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     return parser
 
 
@@ -55,538 +64,511 @@ class Benchmark:
     dir = None
     params = None
     name = None
-    benchmarkComparison = None
     paramSet = None
-    origName = None
 
-    def __init__(self, dir, name=None, params=None, benchmarkComparison=None, paramSet=None, origName=None):
+    def __init__(self, dir, name=None, params=None, paramSet=None):
         self.dir = dir
-        self.name = name if name else os.path.basename(dir)
-        self.origName = origName if origName else os.path.basename(dir)
+        self.name = name
         self.params = params
-        self.benchmarkComparison = benchmarkComparison
-        self.paramSet = paramSet if paramSet else "DEFAULT"
+        self.paramSet = paramSet
 
+def computeVideoTimeSpan(dataJsonlPath):
+    if not os.path.exists(dataJsonlPath): return None
+    span = None
+    with open(dataJsonlPath) as dataJsonlFile:
+        for line in dataJsonlFile:
+            o = json.loads(line)
+            if not "frames" in o or not "time" in o: continue
+            if not span: span = [o["time"], o["time"]]
+            span[1] = o["time"]
+    if span[1] < span[0]: return None
+    return span
 
-def metricsKwargs(args, single=False):
-    """Extra parameters given to compute_metrics.py"""
-    if single:
-        kwargs = {}
-    else:
-        kwargs = dict(piecewise=args.piecewise, offsetTracks=args.offsetTracks, comparisonList=args.compare, exportAlignedData=args.exportAlignedData)
+def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
+    def runAndCapture(cmd):
+        return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
 
-    kwargs['metric_set'] = args.metricSet
-    return kwargs
+    info = {
+        "outputDirectory": dirs.results,
+        "startTime": startTime,
+        "endTime": endTime,
+        "metrics": aggregateMetrics,
+        "parameters": args.params,
+    }
 
+    info["methodName"] = args.methodName
+    info["parameters"] = args.params
+    mainBinary = dirs.results + "/main"
+    if os.path.isfile(mainBinary) and runAndCapture("command -v shasum"):
+        info["fingerprint"] = runAndCapture("shasum -a 256 " + mainBinary)
+    info["system"] = runAndCapture("uname -a")
 
-def readLastLine(filename):
-    with open(filename, 'rb') as f:
-        f.seek(-2, os.SEEK_END)
-        while f.read(1) != b'\n':
-            f.seek(-2, os.SEEK_CUR)
-        return f.readline().decode()
+    if args.gitDir:
+        originalDir = os.getcwd()
+        os.chdir(args.gitDir)
+        inGitRepository = runAndCapture("git rev-parse --is-inside-work-tree")
+        if inGitRepository == "true":
+            if args.gitBranchName:
+                # The `rev-parse` often returns "HEAD" in Github's runner.
+                branchName = args.gitBranchName
+            else:
+                branchName = runAndCapture("git rev-parse --abbrev-ref HEAD")
+            info["git"] = {
+                "repository": runAndCapture("basename `git rev-parse --show-toplevel`"),
+                "branch": branchName,
+                "sha": runAndCapture("git rev-parse --short HEAD"),
+            }
+            subprocess.run("git show > \"{}/git_show.txt\"".format(dirs.results), shell=True)
+            subprocess.run("git diff > \"{}/git_diff.txt\"".format(dirs.results), shell=True)
+            subprocess.run("git diff --staged > \"{}/git_diff_staged.txt\"".format(dirs.results), shell=True)
+        os.chdir(originalDir)
 
+    infoJsonPath = dirs.results + "/info.json"
+    with open(infoJsonPath, "w") as f:
+        f.write(json.dumps(info, indent=4, separators=(',', ': ')))
 
-def filterByTags(info, tags): # filter_by_tags.py
-    requiredTags = tags.split(",")
-    infoDict = json.loads(open(info).read())
-    dirPath = os.path.dirname(info)
-    dirName = os.path.basename(dirPath)
-    foundTags = infoDict.get("tags", [])
-    foundTags.append(dirName)
-    for reqTag in requiredTags:
-        if not reqTag in foundTags:
-            return
-    return dirPath
+    return infoJsonPath
 
+# Maps from JSONL format keys to names shown in the output data and plots.
+TRACK_KINDS = {
+    "groundTruth": "groundTruth",
+    "ARKit": "ARKit",
+    "arcore": "ARCore",
+    "arengine": "AREngine",
+    "output": "OnDevice",
+    "realsense": "RealSense",
+    "gps": "GPS",
+    "rtkgps": "RTKGPS",
+}
 
-def runAndCapture(cmd):
-    return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
+DEVICE_TRANSFORM = {}
+WORLD_TRANSFORM = {
+    "arcore": np.array([
+        [1, 0, 0, 0],
+        [0, 0, -1, 0],
+        [0, 1, 0, 0],
+        [0, 0, 0, 1],
+    ]),
+    "arengine": np.array([
+        [1, 0, 0, 0],
+        [0, 0, -1, 0],
+        [0, 1, 0, 0],
+        [0, 0, 0, 1],
+    ]),
+    # TODO Missing realsense.
+}
 
-
-def withMkdir(dir):
-    Path(dir).mkdir(parents=True, exist_ok=True)
-    return dir
-
-
-def groundTruthColor(groundTruthPath):
-    if "arkit" in groundTruthPath:
-        return "lime"
-    elif "gps" in groundTruthPath:
-        return "red"
-    elif "tango" in groundTruthPath:
-        return "magenta"
-    return "orange"
-
-
-def runComputeMetrics(q, fn):
-    try:
-        q.put(fn())
-    except Exception:
-        track = traceback.format_exc()
-        print(track)
-        q.put(-1) # We must return something, otherwise queue.get() waits forever
-
-
-def computeMetrics(fn):
-    queue = multiprocessing.Queue()
-    p = multiprocessing.Process(target=runComputeMetrics, args=(queue, fn))
-    p.start()
-    result = queue.get(timeout=600)
-    p.join(600)
-    if p.is_alive(): # Terminate still running i.e. join timeout triggered
-        p.terminate()
-        raise Exception("Plotting failed, ran into 10 minute timeout")
-    if result == -1: # runComputeMetrics will return -1 on error
-        raise Exception("Plotting failed, return -1")
-    return result
-
-
-def loadBenchmarkComparisonData(benchmarkComparison, caseDir, groundTruth, jsonlFile, gtCopy, gtJson, slamMapFile, outputFile):
-    if benchmarkComparison and benchmarkComparison.endswith(".csv"):
-        gtFile = caseDir + "/" + benchmarkComparison
-        if not os.path.exists(gtFile):
-            raise Exception("Requested benchmarkComparison doesn't exist: " + gtFile)
-        subprocess.run(["cp", gtFile, gtCopy])
-        return
-
-    gtFile = caseDir + "/" + groundTruth
-    if not benchmarkComparison and os.path.exists(gtFile):
-        subprocess.run(["cp", gtFile, gtCopy])
-        return
-
-    if not os.path.exists(jsonlFile):
-        return
-
+def convertComparisonData(casePaths, metricSets):
     gpsConverter = GpsToLocalConverter()
     rtkgpsConverter = GpsToLocalConverter()
-    dataGroundTruth = []
-    dataARKit = []
-    dataARCore = []
-    dataAREngine = []
-    dataOnDevice = []
-    dataRealsense= []
-    dataGps = []
-    dataRtkGps = []
     frameCount = 0
-    with open(jsonlFile) as f:
-        for line in f.readlines():
-            dataRow = json.loads(line)
-            pos = None
-            if dataRow.get("groundTruth") is not None:
-                pos = dataRow["groundTruth"]["position"]
-                dataGroundTruth.append([dataRow["time"], pos["x"], pos["z"], -pos["y"]])
-            elif dataRow.get("ARKit") is not None:
-                pos = dataRow["ARKit"]["position"]
-                dataARKit.append([dataRow["time"], pos["x"], pos["z"], -pos["y"]])
-            elif dataRow.get("arcore") is not None:
-                pos = dataRow["arcore"]["position"]
-                dataARCore.append([dataRow["time"], pos["x"], pos["y"], pos["z"]])
-            elif dataRow.get("arengine") is not None:
-                pos = dataRow["arengine"]["position"]
-                if pos and pos["x"]: # AREngine sometimes gives nulls, skip them
-                    dataAREngine.append([dataRow["time"], pos["x"], pos["y"], pos["z"]])
-            elif dataRow.get("output") is not None:
-                pos = dataRow["output"]["position"]
-                dataOnDevice.append([dataRow["time"], -pos["x"], pos["z"], pos["y"]])
-            elif dataRow.get("realsense") is not None:
-                pos = dataRow["realsense"]["position"]
-                dataRealsense.append([dataRow["time"], pos["x"], pos["y"], pos["z"]])
-            elif dataRow.get("gps") is not None:
-                pos = gpsConverter.convert(**dataRow["gps"])
-                dataGps.append([dataRow["time"], pos["x"], pos["z"], -pos["y"]])
-            elif dataRow.get("rtkgps") is not None:
-                pos = rtkgpsConverter.convert(**dataRow["rtkgps"])
-                dataRtkGps.append([dataRow["time"], pos["x"], pos["z"], -pos["y"]])
-            elif dataRow.get("frames") is not None:
-                frameCount += 1
+    datasets = {}
 
-    dataWrite = None
-    if (not benchmarkComparison or benchmarkComparison == "groundTruth") and dataGroundTruth:
-        dataWrite = dataGroundTruth
-    elif (not benchmarkComparison or benchmarkComparison == "ARKit") and dataARKit:
-        dataWrite = dataARKit
-    elif (not benchmarkComparison or benchmarkComparison == "ARCore") and dataARCore:
-        dataWrite = dataARCore
-    elif (not benchmarkComparison or benchmarkComparison == "AREngine") and dataAREngine:
-        dataWrite = dataAREngine
-    elif (not benchmarkComparison or benchmarkComparison == "OnDevice") and dataOnDevice:
-        dataWrite = dataOnDevice
-    elif (not benchmarkComparison or benchmarkComparison == "RealSense") and dataRealsense:
-        dataWrite = dataRealsense
-    elif (not benchmarkComparison or benchmarkComparison == "GPS") and dataGps:
-        dataWrite = dataGps
-    elif (not benchmarkComparison or benchmarkComparison == "RTKGPS") and dataRtkGps:
-        dataWrite = dataRtkGps
+    needsOrientation = Metric.ANGULAR_VELOCITY.value in metricSets
+    if needsOrientation:
+        # Import conditionally since scipy is otherwise not needed for benchmarking.
+        from scipy.spatial.transform import Rotation
 
-    if not dataWrite and benchmarkComparison:
-        raise Exception("Requested benchmarkComparison doesn't exist: " + benchmarkComparison)
+    def handleRow(rowJson):
+        kind = None
+        for k in TRACK_KINDS:
+            if rowJson.get(k) is not None:
+                kind = k
+                break
+        if not kind: return
 
-    if dataWrite:
-        with open(gtCopy, "w") as f:
-            for entry in dataWrite:
-                f.write(",".join(["{}".format(x) for x in entry]) + "\n")
+        if not kind in datasets:
+            datasets[kind] = []
 
-        slamMap = []
-        if os.path.exists(slamMapFile):
-            with open(slamMapFile) as f:
-                for line in f.readlines():
-                    y = [float(x) for x in line.split(",")]
-                    slamMap.append([y[0], -y[1], y[3], y[2]])
+        hasOrientation = False
+        dToW = np.identity(4) # Device-to-world matrix.
+        if kind == "gps":
+            p = gpsConverter.convert(**rowJson["gps"])
+        elif kind == "rtkgps":
+            p = rtkgpsConverter.convert(**dataRow["rtkgps"])
         else:
-            mapFn = outputFile.rsplit(".")[0] + "_map.jsonl"
-            if os.path.exists(mapFn):
-                with open(mapFn) as f:
-                    for line in f.readlines():
-                        row = json.loads(line)
-                        slamMap.append([row["time"], -row["position"]["x"], row["position"]["z"], row["position"]["y"]])
+            p = rowJson[kind]["position"]
+            if needsOrientation and "orientation" in rowJson[kind]:
+                hasOrientation = True
+                q = [rowJson[kind]["orientation"][c] for c in "xyzw"]
+                dToW[0:3, 0:3] = Rotation.from_quat(q).as_matrix()
+        dToW[0:3, 3] = [p[c] for c in "xyz"]
 
-        with open(gtJson, "w") as f:
-            def addDataSet(array, name, dataset, benchmark):
-                if dataset:
-                    if benchmark == name:
-                        array.insert(0, {'name': name, 'data': dataset})
-                    else:
-                        array.append({'name': name, 'data': dataset})
+        if kind in DEVICE_TRANSFORM:
+            dToW = dToW.dot(DEVICE_TRANSFORM[kind])
+        if kind in WORLD_TRANSFORM:
+            dToW = WORLD_TRANSFORM[kind].dot(dToW)
 
-            datasets = []
-            addDataSet(datasets, "groundTruth", dataGroundTruth, benchmarkComparison)
-            addDataSet(datasets, "ARKit", dataARKit, benchmarkComparison)
-            addDataSet(datasets, "ARCore", dataARCore, benchmarkComparison)
-            addDataSet(datasets, "AREngine", dataAREngine, benchmarkComparison)
-            addDataSet(datasets, "slam", slamMap, benchmarkComparison)
-            addDataSet(datasets, "OnDevice", dataOnDevice, benchmarkComparison)
-            addDataSet(datasets, "RealSense", dataRealsense, benchmarkComparison)
-            addDataSet(datasets, "GPS", dataGps, benchmarkComparison)
-            addDataSet(datasets, "RTKGPS", dataRtkGps, benchmarkComparison)
-            json.dump({'datasets': datasets}, f)
+        json = {
+            "time": rowJson["time"],
+            "position": { "x": dToW[0, 3], "y": dToW[1, 3], "z": dToW[2, 3] },
+        }
+        if hasOrientation:
+            q = Rotation.from_matrix(dToW[0:3, 0:3]).as_quat()
+            json["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
+        datasets[kind].append(json)
+
+    if os.path.exists(casePaths["input"]):
+        with open(casePaths["input"]) as f:
+            for line in f.readlines():
+                dataRow = json.loads(line)
+                if dataRow.get("frames") is not None:
+                    frameCount += 1
+                    continue
+                handleRow(dataRow)
+    if os.path.exists(casePaths["inputGroundTruth"]):
+        with open(casePaths["inputGroundTruth"]) as f:
+            for line in f.readlines():
+                handleRow(json.loads(line))
+
+    postprocessed = []
+    if COMPARE_POSTPROCESSED and os.path.exists(casePaths["outputMap"]):
+        with open(casePaths["outputMap"]) as f:
+            for line in f.readlines():
+                row = json.loads(line)
+                postprocessed.append({
+                    "time": row["time"],
+                    "position": row["position"],
+                })
+
+    realtime = []
+    if COMPARE_POSTPROCESSED and os.path.exists(casePaths["outputRealtime"]):
+        with open(casePaths["outputRealtime"]) as f:
+            for line in f.readlines():
+                row = json.loads(line)
+                realtime.append({
+                    "time": row["time"],
+                    "position": row["position"],
+                })
+
+    with open(casePaths["gtJson"], "w") as gtJsonFile:
+        def addDataSet(array, name, d):
+            if d: array.append({ 'name': name, 'data': d })
+
+        # First found data type will be used as ground truth.
+        kindsOrdered = [
+            "groundTruth",
+            "ARKit",
+            "arcore",
+            "arengine",
+            "output",
+            "realsense",
+            "gps",
+            "rtkgps",
+        ]
+        datasetsOrdered = []
+        for kind in kindsOrdered:
+            if not kind in datasets: continue
+            addDataSet(datasetsOrdered, TRACK_KINDS[kind], datasets[kind])
+
+        if COMPARE_POSTPROCESSED:
+            addDataSet(datasetsOrdered, "postprocessed", postprocessed)
+            addDataSet(datasetsOrdered, "realtime", realtime)
+
+        json.dump({'datasets': datasetsOrdered}, gtJsonFile)
 
     return frameCount
 
-
-def singleBenchmark(benchmark, dirs, vioTrackingFn, gtColor, cArgs):
-    args = cArgs
+def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics=None):
     caseDir = benchmark.dir
     caseName = benchmark.name
-    jsonlFile = caseDir + "/data.jsonl"
-    outputFile = "{}/{}.jsonl".format(dirs.out, caseName)
-    slamMapFile = "{}/{}.csv".format(dirs.slamMaps, caseName)
-    gtCopy = "{}/{}.csv".format(dirs.gt, caseName)
-    gtJson = "{}/{}.json".format(dirs.gt, caseName)
-    figure = "{}/{}.png".format(dirs.figures, caseName)
-    endPosFile = "{}/{}.txt".format(dirs.endpos, caseName)
-    datasetInfo = "{}/{}.json".format(dirs.info, caseName)
 
-    duration = -1
+    casePaths = {
+        "input": caseDir + "/data.jsonl",
+        "inputGroundTruth": caseDir + "/groundtruth.jsonl",
+        "output": "{}/{}.jsonl".format(dirs.out, caseName),
+        "outputMap": "{}/{}_map.jsonl".format(dirs.out, caseName),
+        "outputRealtime": "{}/{}_realtime.jsonl".format(dirs.out, caseName),
+        "gtJson": "{}/{}.json".format(dirs.groundTruth, caseName),
+        "logs": "{}/{}.txt".format(dirs.logs, caseName),
+    }
 
-    failed = True
-    for i in range(5): # Attempt to run benchmark 5 times if it fails
-        # Clear output files from previous failed runs
-        if os.path.exists(outputFile): os.remove(outputFile)
-        if os.path.exists(slamMapFile): os.remove(slamMapFile)
-        # Run tracking
-        start = time.time()
-        vioTrackingFn(args, benchmark, dirs.results, outputFile, slamMapFile)
-        duration = time.time() - start
-        # Verify that output file has correct number of columns, if not retry
-        with open(outputFile, "r") as f:
-            columns = {}
-            for line in f.readlines():
-                columns[line.count(',')] = True
-            if len(columns) == 1:
-                # Success, all rows have same number of columns
-                failed = False
-                break
-        print("Warning! Failed attempt number {}. Unequal number of colums in output file".format(i))
+    # Compute CPU time and wall time.
+    timeCmd = ""
+    if pathlib.Path("/usr/bin/time").exists():
+        # GNU `time` format is easier to set than for bash/zsh `time`.
+        timeCmd = "/usr/bin/time -f '{}: %U %S %P'".format(CPU_TIME_MESSAGE)
+    startTime = time.time()
 
-    if failed:
-        raise Exception("Error! Failed to run benchmark 5 times")
+    vioSuccess = vioTrackingFn(args, benchmark, dirs.results, casePaths["output"], timeCmd)
 
-    frameCount = loadBenchmarkComparisonData(benchmark.benchmarkComparison, caseDir, args.groundTruth, jsonlFile, gtCopy, gtJson, slamMapFile, outputFile)
+    duration = time.time() - startTime
+    cpuTime = None
+    if timeCmd:
+        with open(casePaths["logs"], "r") as f:
+            for line in f:
+                if not line.startswith(CPU_TIME_MESSAGE): continue
+                tokens = line.split()
+                cpuTime = float(tokens[-2]) + float(tokens[-3]) # sys + user
 
-    metric = computeMetrics(partial(compute_metrics, folder=dirs.results, casename=caseName, figure_output=figure, **metricsKwargs(args, single=True)))
-    if metric:
-        print("{}: {:.2f} seconds, metric: {:.2f}".format(caseName, duration, metric))
-    else:
-        print("{}: {:.2f} seconds, no ground-truth".format(caseName, duration))
+    if not pathlib.Path(casePaths["output"]).exists():
+        print("No output for case", caseName)
+        return
 
-    endPosition = readLastLine(outputFile).split(",")[3:5]
-    with open(endPosFile, "w") as f:
-        f.write(caseName + "," + ",".join(endPosition) + "\n")
+    metricSets = args.metricSet.split(",")
+    frameCount = convertComparisonData(casePaths, metricSets)
 
-    hostname = socket.gethostname()
-    if args.displayHostname:
-        firstPart = hostname.find('.')
-        if firstPart > 0:
-            hostname = hostname[0:firstPart]
-    else:
-        hostname = None
-
-    with open(datasetInfo, "w") as f:
-        f.write(json.dumps({
+    infoPath = "{}/{}.json".format(dirs.info, caseName)
+    with open(infoPath, "w") as infoFile:
+        infoJson = {
             "caseName": caseName,
             "dir": benchmark.dir,
             "paramSet": benchmark.paramSet,
-            "origName": benchmark.origName,
-            "hostname": hostname,
             "duration": duration,
-            "frameCount": frameCount
-        }))
+            "frameCount": frameCount,
+            "metricSets": metricSets,
+            "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
+        }
+        if cpuTime: infoJson["cpuTime"] = cpuTime
+        infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': ')))
 
-    return True
+    baseline = None
+    if baselineMetrics and caseName in baselineMetrics:
+        baseline = baselineMetrics[caseName]
 
+    try:
+        metric = computeMetrics(dirs.results, caseName, baseline)
+    except Exception as e:
+        print("computeMetrics() failed for {}: {}".format(caseName, e))
+        return False
 
-def aggregateBenchmarks(args, dirs, gtColor, params, infoJson, runId, deterministic=False):
-    print("Aggregating benchmarks...")
+    metricStr = "N/A" # Either no ground-truth or no VIO output.
+    if metric: metricStr = "{:.2f}".format(metric)
+    print("{:30} {:>6.0f}s   metric: {:>8}".format(caseName, duration, metricStr))
+    return vioSuccess
 
-    with open(dirs.results + "/end_positions.txt", 'w') as f:
-        for x in os.walk(dirs.endpos):
-            for file in x[2]:
-                with open(os.path.join(x[0], file)) as f2:
-                    f.write(f2.read())
-
-    metricsFile = dirs.results + "/metrics.csv"
-    if os.path.exists(metricsFile):
-        os.remove(metricsFile)
-    #    raise Exception("Metrics file already exists, have you already ran the report aggregation for this benchmark runId?")
-    summaryFigure = dirs.results + "/figures.png"
-    summaryFigureZ = dirs.results + "/figures-z-axis.png"
-
-    if metricsFile:
-        with open(metricsFile, "a") as f: f.write("case,metrics\n")
-    else: sys.stdout.write("case,metrics\n")
-
-    compute_metrics(folder=dirs.results, figure_output=summaryFigure, title=params, metricFile=metricsFile, **metricsKwargs(args))
-    compute_metrics(folder=dirs.results, figure_output=summaryFigureZ, title=params, metricFile=None, z_axis=True, **metricsKwargs(args))
-
-    slamMapFigure = dirs.results + "/slam-maps.png"
-    draw_slam_maps(map_dir=dirs.slamMaps, figure_output=slamMapFigure)
-
-    with open(infoJson) as f:
-        info = json.load(f)
-
-    metricsLines = 0
-    with open(metricsFile, 'r') as f:
-        for line in f.readlines():
-            metricsLines += 1
-    mean = 0
-    if metricsLines > 1:
-        sum = 0
-        with open(metricsFile, "r") as f:
-            next(f) # Skip header row
-            for line in f:
-                sum += float(line.strip().split(",")[1])
-        mean = sum / (metricsLines - 1)
-        print("mean: {}".format(mean))
-        info["meanMetrics"] = mean
-
-    # Also put summary figures to their own folder.
-    Path(args.output + "/figures/").mkdir(parents=True, exist_ok=True)
-    subprocess.run(["cp", summaryFigure, args.output + "/figures/" + runId + ".png"])
-
-    if deterministic:
-        compare = []
-        for x in os.walk(dirs.logs):
-            for file in sorted(x[2]):
-                inn = os.path.join(x[0], file)
-                out = os.path.join(x[0], os.path.splitext(os.path.basename(file))[0] + "_deterministic.txt")
-                compare.append(out)
-                with open(inn) as f, open(out, "w") as f2:
-                    for line in f:
-                        if not "Timings" in line and not "timings" in line: # Filter out most of the varying output
-                            f2.write(line)
-        for i0, f0 in enumerate(compare):
-            for i1, f1 in enumerate(compare):
-                if i0 >= i1:
-                    continue
-                print("Comparing {} to {}", i0 + 1, i1 + 1)
-                diffLineCount = int(subprocess.Popen("diff -y --suppress-common-lines " + f0 + " " + f1 + " | wc -l",
-                    shell=True, stdout=subprocess.PIPE, universal_newlines=True).communicate()[0])
-                #         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-                if diffLineCount < 20:
-                    print("Diff line count {}, within acceptable limits".format(diffLineCount))
-                else:
-                    print("Diff line count {}".format(diffLineCount))
-                    # print("Opening file")
-                    # subprocess.run("/usr/bin/opendiff " + f0 + " " + f1, shell=True)
-
-    # Overwrite info file with new fields.
-    info["endTime"] = datetime.now().strftime(DATE_FORMAT)
-    with open(infoJson, "w") as f:
-        f.write(json.dumps(info, indent=4, separators=(',', ': ')))
-
-
-def loadBenchmarkSet(args, setName):
+def setupBenchmarkFromSetDescription(args, setName):
     # Look for the set file in a predefined directory or by path.
     searchDirs = [args.setDir + "/", os.getcwd(), ""]
     success = False
+    triedFiles = []
     for searchDir in searchDirs:
         try:
             path = searchDir + setName
             if not ".json" in path:
                 path += ".json"
+            triedFiles.append(path)
             setFile = open(path)
             success = True
             break
         except FileNotFoundError:
             pass
     if not success:
-        raise Exception("Benchmark set %s not found" % setName)
+        raise Exception("Benchmark set \"{}\" not found in {}".format(setName, searchDirs))
 
-    setDefintion = json.loads(setFile.read())
-    pathPrefix = args.dir
+    setDefinition = json.loads(setFile.read())
     benchmarks = []
     parameterSets = [{}]
-    if setDefintion.get("parameterSets") != None:
-        parameterSets = setDefintion["parameterSets"]
-        print("For {} parameters sets: {}".format(len(setDefintion["parameterSets"]),
-            ", ".join("[" + s["params"] + "]" for s in setDefintion["parameterSets"])))
-    for benchmark in setDefintion["benchmarks"]:
+    if setDefinition.get("parameterSets") != None:
+        parameterSets = setDefinition["parameterSets"]
+        print("For {} parameters sets: {}".format(len(setDefinition["parameterSets"]),
+            ", ".join("[" + s["params"] + "]" for s in setDefinition["parameterSets"])))
+    for benchmark in setDefinition["benchmarks"]:
         for parameterSet in parameterSets:
-            dir = (pathPrefix + "/" + benchmark["folder"])
+            dir = args.rootDataDir + "/" + benchmark["folder"]
             params = []
             if parameterSet.get("params"): params.append(parameterSet["params"])
             if benchmark.get("params"): params.append(benchmark["params"])
-            name = benchmark.get("name").replace(' ', '-') if benchmark.get("name") else os.path.basename(dir)
+            if benchmark.get("name"):
+                name = benchmark.get("name").replace(' ', '-')
+            else:
+                name = benchmark["folder"]
+                for symbol in " _/": name = name.replace(symbol, '-')
             if parameterSet.get("name"): name = "{}-{}".format(name, parameterSet.get("name").replace(' ', '-'))
             benchmarks.append(Benchmark(
                 dir=dir,
                 params=(None if len(params) == 0 else " ".join(params)),
                 name=name,
-                origName=benchmark.get("name"),
-                benchmarkComparison=benchmark.get("benchmarkComparison"),
-                paramSet=parameterSet.get("name")
+                paramSet=(parameterSet["name"] if "name" in parameterSet else args.methodName),
             ))
     x = lambda s : "{} ({})".format(s["folder"], s["params"]) if s.get("params") else s["folder"]
-    print("Running {} benchmark datasets:\n  {}".format(len(setDefintion["benchmarks"]),
-        "\n  ".join(x(s) for s in setDefintion["benchmarks"])))
+    print("Running {} benchmark datasets:\n  {}".format(len(setDefinition["benchmarks"]),
+        "\n  ".join(x(s) for s in setDefinition["benchmarks"])))
 
     if len(benchmarks) != len(set(b.name for b in benchmarks)):
         raise Exception("All benchmarks don't have unique names! Make sure all parameterSets and duplicate data sets have 'name' field")
     return benchmarks
 
 
-def loadBenchmarks(args, tags):
-    cases = deque([])
-    if tags:
-        # Filter datasets that match given tags.
-        # `find` -L flag finds the files in symlinked folders.
-        infoFiles = []
-        for x in os.walk(args.dir):
-            for file in x[2]:
-                if file == "info.json":
-                    infoFiles.append(os.path.join(x[0], file))
-        infoFiles.sort()
-        for infoFile in infoFiles:
-            path = filterByTags(infoFile, tags)
-            if path:
-                cases.append(path)
-    else:
-        # Run every dataset. Most useful with the `-dir` option.
-        folders = next(os.walk(args.dir))[1]
-        folders.sort()
-        for x in folders:
-            cases.append(os.path.join(args.dir, x))
-
-    # When doing parallel benchmarks, depending on the filesystem it may improve performance
-    # to avoid reading the same files concurrently, so this reorders the case list.
-    if args.rotateCases:
-        cases.rotate(-int(args.rotateCases))
-
+def setupBenchmarkFromFolder(args, dataDir):
+    cases = next(os.walk(args.dataDir))[1]
+    cases.sort()
     print("Running benchmarks:\n  " + "\n  ".join([os.path.basename(c) for c in cases]))
-    return [Benchmark(case) for case in cases]
+    benchmarks = []
+    for case in cases:
+        benchmarks.append(Benchmark(
+            dir=os.path.join(args.dataDir, case),
+            params=None,
+            name=case,
+            paramSet=args.methodName,
+        ))
+    return benchmarks
 
+def setupBenchmarkFromRecordingDir(args, recordingDir):
+    print("Running benchmarks:\n  " + recordingDir)
+    case = recordingDir.rsplit('/', 1)[1]
+    benchmarks = []
+    benchmarks.append(Benchmark(
+        dir=recordingDir,
+        params=None,
+        name=case,
+        paramSet=args.methodName,
+    ))
+    return benchmarks
+
+class Dirs:
+    results = None
+    groundTruth = None
+    out = None
+    figures = None
+    logs = None
+    info = None
+
+def collectMetrics(values, key):
+    # Filter out non-existing values and Nones.
+    return [v[key] for v in values if (key in v and not v[key] is None)]
+
+def aggregateMetrics(metrics):
+    def geometricMean(a):
+        assert(a)
+        return np.array(a).prod() ** (1.0 / len(a))
+    if not metrics: return None
+
+    metricSets = set()
+    for metric in metrics:
+        metricSets.update(metric.keys())
+
+    result = {}
+    for metricSetStr in metricSets:
+        values = collectMetrics(metrics, metricSetStr)
+        if not values:
+            result[metricSetStr] = None
+            continue
+
+        if metricSetStr == "relative":
+            result["relative"] = {}
+            for relativeMetric in values[0]:
+                result["relative"][relativeMetric] = geometricMean(collectMetrics(values, relativeMetric))
+        elif isinstance(values[0], float):
+            # Single numbers like for coverage and angular velocity metrics.
+            result[metricSetStr] = np.mean(values)
+        else:
+            # Nested entries. Average within each category.
+            result[metricSetStr] = {}
+            for x in values[0]:
+                result[metricSetStr][x] = np.mean(collectMetrics(values, x))
+    return result
 
 def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
-    startTime = datetime.now()
-    now = startTime.strftime(DATE_FORMAT)
+    """Run benchmark for a VIO algorithm using callbacks
+
+    @param args arguments to use
+    @param vioTrackingFn function that runs VIO on a single dataset. Should return True iff VIO did not produce errors
+    @param setupFn function that is run before any of the individual sets
+    @param teardownFn function that is run after all the individual sets
+    @return True iff none of the VIO runs produced errors
+    """
+
+    startTime = datetime.now().strftime(DATE_FORMAT)
+    runId = args.runId if args.runId else startTime
 
     if args.skipBenchmark and not args.runId:
-        raise Exception("skipBenchmark is true and runId isn't set , cannot aggregate existing results without runId")
-    if args.skipBenchmark and args.runId and not os.path.exists(args.output + "/" + args.runId):
-        raise Exception("Benchmark folder for runId doesn't exist, cannot aggregate report")
-    runId = args.runId if args.runId else now
+        raise Exception("-skipBenchmark requires -runId.")
 
-    # Direcotries
-    class Dirs:
-        results = withMkdir(args.output + "/" + runId)
-        gt = withMkdir(results + "/ground-truth")
-        out = withMkdir(results + "/output")
-        slamMaps = withMkdir(results + "/slam-maps")
-        figures = withMkdir(results + "/figures")
-        logs = withMkdir(results + "/logs")
-        endpos = withMkdir(results + "/endpositions")
-        info = withMkdir(results + "/info")
+    def withMkdir(dir):
+        pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
+        return dir
+
+    results = withMkdir(os.path.abspath(args.output + "/" + runId))
+    print(results)
+
+    baselineMetrics = {}
+    if args.baseline:
+        with open(args.baseline) as baselineFile:
+            baselineMetrics = json.loads(baselineFile.read())
+
+    # TODO Is this class useless?
     dirs = Dirs()
+    dirs.results = results
+    dirs.groundTruth = withMkdir(results + "/ground-truth")
+    dirs.out = withMkdir(results + "/vio-output")
+    dirs.figures = withMkdir(results + "/figures")
+    dirs.logs = withMkdir(results + "/vio-logs")
+    dirs.info = withMkdir(results + "/info")
+    dirs.metrics = withMkdir(results + "/metrics")
 
     if setupFn:
         setupFn(args, dirs.results)
 
-    if not args.skipAggregate: # When skipping aggregate, shouldn't touch any shared files
-        info = {
-            "outputDirectory": dirs.results,
-            "startTime": datetime.now().strftime(DATE_FORMAT),
-        }
-        # Print only the basics, save rest to file.
-        for k, v in info.items():
-            print("{}: {}".format(k, v))
-
-        info["parameters"] = args.params
-        mainBinary = dirs.results + "/main"
-        if os.path.isfile(mainBinary) and runAndCapture("command -v shasum"):
-            info["fingerprint"] = runAndCapture("shasum -a 256 " + mainBinary)
-        info["system"] = runAndCapture("uname -a")
-
-        inGitRepository = runAndCapture("git rev-parse --is-inside-work-tree")
-        if inGitRepository == "true":
-            info["git"] = {
-                "repository": runAndCapture("basename `git rev-parse --show-toplevel`"),
-                "branch": runAndCapture("git rev-parse --abbrev-ref HEAD"),
-                "sha": runAndCapture("git rev-parse --short HEAD"),
-            }
-            subprocess.run("git show > \"" + dirs.results +  "/git.odometry.show\"", shell=True)
-            subprocess.run("git diff > \"" + dirs.results +  "/git.odometry.diff\"", shell=True)
-            subprocess.run("git diff --staged > \"" + dirs.results +  "/git.odometry.staged.diff\"", shell=True)
-        infoJson = dirs.results + "/info.json"
-        with open(infoJson, "w") as f:
-            f.write(json.dumps(info, indent=4, separators=(',', ': ')))
-
-    gtColor = groundTruthColor(args.groundTruth)
-
+    success = True
     if not args.skipBenchmark:
-        benchmarks = None
         if args.set:
-            benchmarks = loadBenchmarkSet(args, args.set)
+            benchmarks = setupBenchmarkFromSetDescription(args, args.set)
+        elif args.dataDir:
+            benchmarks = setupBenchmarkFromFolder(args, args.dataDir)
+        elif args.recordingDir:
+            benchmarks = setupBenchmarkFromRecordingDir(args, args.recordingDir)
         else:
-            benchmarks = loadBenchmarks(args, args.tags)
-
-        if args.distributedBatchSize and args.distributedBatchNumber:
-            benchmarksFiltered = []
-            for idx, b in enumerate(benchmarks):
-                if idx % int(args.distributedBatchSize) == int(args.distributedBatchNumber):
-                    benchmarksFiltered.append(b)
-            benchmarks = benchmarksFiltered
-            print("Distributed mode on. Only running following benchmarks: " + ", ".join([b.name for b in benchmarks]))
+            print("You must select benchmark data using either `-set`, `-dataDir` or `-recordingDir`.")
+            return
 
         if len(benchmarks) == 0:
             print("No matching benchmarks found! Exiting")
             return
 
-        threadFunction = partial(singleBenchmark,
-            dirs=dirs, vioTrackingFn=vioTrackingFn, gtColor=gtColor, cArgs=args)
+        threadFunction = partial(benchmarkSingleDataset,
+            dirs=dirs, vioTrackingFn=vioTrackingFn, args=args, baselineMetrics=baselineMetrics)
 
+        print("---")
         if args.threads == 1:
-            for b in benchmarks:
-                threadFunction(b)
+            for benchmark in benchmarks:
+                if not threadFunction(benchmark):
+                    success = False
         else:
-            workers = int(args.threads) if args.threads else multiprocessing.cpu_count()
-            print("Using {} threads for running benchmarks, change this with '-threads #'".format(workers))
-            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-                for i in executor.map(threadFunction, benchmarks):
-                    assert(i)
-
-    if not args.skipAggregate:
-        aggregateBenchmarks(args, dirs, gtColor, args.params, infoJson, runId, args.testDeterministic)
+            workerCount = int(args.threads) if args.threads else multiprocessing.cpu_count()
+            with concurrent.futures.ProcessPoolExecutor(max_workers=workerCount) as executor:
+                for ret in executor.map(threadFunction, benchmarks):
+                    if not ret: success = False
 
     if teardownFn:
         teardownFn(args, dirs.results)
+
+    endTime = datetime.now().strftime(DATE_FORMAT)
+
+    metrics = {}
+    for x in os.walk(results + "/metrics"):
+        for caseMetricsJsonPath in x[2]:
+            benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
+            caseName = caseMetricsJsonPath.split(".")[0]
+            assert(not caseName in metrics)
+            metrics[caseName] = benchmarkMetrics
+    ametrics = aggregateMetrics(list(metrics.values()))
+
+    # Delete the relative numbers so it's easier to copy-paste entries from this file
+    # to the baseline metrics file.
+    for x in metrics:
+        if "relative" in metrics[x]: del metrics[x]["relative"]
+    metricsJsonPath = results + "/metrics.json"
+    with open(metricsJsonPath, "w") as f:
+        f.write(json.dumps(metrics, indent=4, separators=(',', ': ')))
+
+    # Needed by plotting below.
+    infoJsonPath = writeSharedInfoFile(args, dirs, startTime, endTime, ametrics)
+
+    print("---\nBenchmarks finished. Computing figures…")
+    startTime = time.time()
+    makeAllPlots(results, args.excludePlots)
+    # Print the elapsed time since the plotting has been quite slow in the past.
+    print("… took {:.0f}s.".format(time.time() - startTime))
+
+    # Copy the aggregate figure of each metric to a shared folder for easier comparison.
+    metricSets = args.metricSet.split(",")
+    for metricSet in metricSets:
+        src = getFigurePath("{}/figures".format(results), metricSet)
+        if not os.path.exists(src): continue
+        dstDir = os.path.abspath("{}/figures/{}".format(args.output, metricSet))
+        pathlib.Path(dstDir).mkdir(parents=True, exist_ok=True)
+        dst = "{}/{}.png".format(dstDir, runId)
+        subprocess.run(["cp", src, dst])
+
+    return success

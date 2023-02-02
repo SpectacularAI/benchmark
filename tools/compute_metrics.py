@@ -1,114 +1,105 @@
-# To compute and plot a metric for an already run benchmark, use eg:
-#   python3 vio_benchmark/benchmark/compute_metrics.py \
-#     output/2021-01-04_13-08-26 \
-#     -p --metric_set=full_3d_align
+#!/usr/bin/env python3
 
-import argparse, os, sys
-from collections import OrderedDict
-import numpy as np
 import json
 import math
-from pathlib import Path
+import os
+import pathlib
 
+from enum import Enum
 
-SHADES_OF_BLUE = ['blue', 'darkturquoise', 'darkorchid', 'dodgerblue', 'darkslateblue']
+import numpy as np
 
-EXTERNAL_COLORS = {
-    'groundtruth': 'salmon',
-    'realsense': 'black',
-    'arkit': 'deeppink',
-    'arcore': 'lawngreen',
-    'arengine': 'violet',
-    'ondevice': 'steelblue',
-    'slam': '#202020',
-    'gps': 'darkred',
-    'rtkgps': 'salmon'
-}
+# Track types accurate enough to be used as ground-truth. In lowercase.
+# Instead of adding entries to this list, consider converting your dataset to have "groundTruth" rows.
+GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps"]
 
-DEFAULT_COMPARISONS = 'groundTruth,ARKit,ARCore,AREngine,OnDevice,RealSense,GPS,RTKGPS' # Exclude slam map by default
+# Scaling to get numbers closer to 1 that are easier for humans to compare.
+PIECEWISE_METRIC_SCALE = 100.0
 
-def parse_args():
-    p = argparse.ArgumentParser(
-        description="compute benchmarking metrics for a single test case")
-    p.add_argument('folder')
-    p.add_argument('-case', '--casename', type=str)
-    p.add_argument('-p', '--show_plot', action='store_true')
-    p.add_argument('-z', '--z_axis', action='store_true')
-    p.add_argument('--columns', type=int, default=0)
-    p.add_argument('-fo', '--figure_output', type=str)
-    p.add_argument('-t', '--title', type=str)
-    p.add_argument('--metricFile', type=str)
-    p.add_argument('--metric_set', type=str, default='default', choices={'default', 'xy_only', 'full_2d_align', 'full_3d_align', 'full_sim3'})
-    return p.parse_args()
+# If number of ground truth measurements per second is lower than this,
+# treat the ground truth as sparse (use all points).
+SPARSITY_THRESHOLD = 1.0
 
-def metric_set_to_alignment_params(metric_set):
-    if metric_set == 'full_2d_align':
+# If VIO has break longer than this, subtract the break length from the coverage metric.
+COVERAGE_GAP_THRESHOLD_SECONDS = 1.0
+
+class Metric(Enum):
+    # For non-piecewise alignment, this is the "proper" metric for VIO methods that
+    # rotates the track only around the z-axis since the VIO is supposed to be able
+    # to estimate direction of gravity (z-axis). The piecewise alignment methods are
+    # similar to this.
+    FULL = "full"
+    # This is the SE3 alignment commonly used in academic benchmarks (with RMSE).
+    FULL_3D = "full_3d"
+    # Sometimes used in academic benchmarks for monocular visual-only methods.
+    FULL_3D_SCALED = "full_sim3"
+    # Like `FULL`, but cuts the track into segments and aligns each individually.
+    PIECEWISE = "piecewise"
+    # Like `PIECEWISE`, but does not penalize drift in z direction.
+    PIECEWISE_NO_Z = "piecewise_no_z"
+    # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
+    COVERAGE = "coverage"
+    # RMSE of aligned angular velocities. May be computed from orientations if not available in the data.
+    ANGULAR_VELOCITY = "angular_velocity"
+    # RMSE of aligned velocities. May be computed from positions if not available in the data.
+    VELOCITY = "velocity"
+    # Like `FULL`, but for sparse postprocessed output, eg our VIO's SLAM map keyframes.
+    POSTPROCESSED = "postprocessed"
+    # Output from UNIX `time` command (not wall time).
+    CPU_TIME = "cpu_time"
+
+def metricSetToAlignmentParams(metricSet):
+    if metricSet in [Metric.FULL, Metric.POSTPROCESSED, Metric.COVERAGE]:
         return dict(fix_origin=False)
-    elif metric_set == 'full_3d_align':
+    elif metricSet == Metric.FULL_3D:
         return dict(fix_origin=False, align3d=True)
-    elif metric_set == 'full_sim3':
+    elif metricSet == Metric.FULL_3D_SCALED:
         return dict(fix_origin=False, align3d=True, fix_scale=False)
+    elif metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
+        return {} # The defaults are correct.
+    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
+        return {} # No natural alignment for these.
     else:
-        return {}
+        raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
 
-def getColor(datasetName="ours", index=0):
-    # return "black"
-    if datasetName == "ours":
-        return SHADES_OF_BLUE[index % len(SHADES_OF_BLUE)]
+def isSparse(out):
+    n = out.shape[0]
+    if n <= 1: return True
+    lengthSeconds = out[-1, 0] - out[0, 0]
+    return n / lengthSeconds < SPARSITY_THRESHOLD
+
+def getOverlap(out, gt):
+    """ Get overlapping parts of `out` and `gt` tracks on the time grid of `gt`. """
+    if gt.size == 0 or out.size == 0:
+        return np.array([]), np.array([])
+    gt_t = gt[:, 0]
+    out_t = out[:, 0]
+    if isSparse(gt):
+        # Use all ground truth points even if it means extrapolating VIO.
+        gt_part = gt
     else:
-        return EXTERNAL_COLORS[datasetName.lower()]
-
-def wordWrap(s):
-    LINE_MAX_LENGTH = 150
-    out = ""
-    l = 0
-    for i, token in enumerate(s.split(" ")):
-        l += len(token) + 1
-        if l > LINE_MAX_LENGTH:
-            out += "\n"
-            l = 0
-        elif i > 0:
-            out += " "
-        out += token
-    return out
-
-# Use covariance to rotate data to minimize height
-def optimalRotation(data, ax1=1, ax2=2):
-    dataxy = data[:,[ax1, ax2]]
-    ca = np.cov(dataxy, y = None, rowvar = 0, bias = 1)
-    v, vect = np.linalg.eig(ca)
-    tvect = np.transpose(vect)
-    ar = np.dot(dataxy, np.linalg.inv(tvect))
-    dimensions = np.max(ar,axis=0) - np.min(ar,axis=0)
-    if dimensions[0] > dimensions[1]:
-        data[:,[ax1, ax2]] = ar
-    else:
-        ar_90_degrees = np.dot(ar, np.linalg.inv([[0, -1], [1, 0]]))
-        data[:,[ax1, ax2]] = ar_90_degrees
-
-def get_overlapping_xyz_parts_on_same_time_grid(out, gt):
-    gt_t = gt[:,0]
-    out_t = out[:,0]
-    min_t = max(np.min(out_t), np.min(gt_t))
-    max_t = min(np.max(out_t), np.max(gt_t))
-    # Use the ground-truth grid because ground-truth may have gaps (GPS and prisms)
-    # and VIO developers can always increase their methods' output rate.
-    gt_part = gt[(gt_t >= min_t) & (gt_t <= max_t), :]
+        min_t = max(np.min(out_t), np.min(gt_t))
+        max_t = min(np.max(out_t), np.max(gt_t))
+        gt_part = gt[(gt_t >= min_t) & (gt_t <= max_t), :]
     out_part = np.hstack([np.interp(gt_part[:, 0], out_t, out[:,i])[:, np.newaxis] for i in range(out.shape[1])])
     return out_part[:, 1:], gt_part[:, 1:]
 
-def align_to_gt(out, gt, rel_align_time=1/3.0, fix_origin=True, align3d=False, fix_scale=True):
+def align(out, gt, rel_align_time=-1, fix_origin=True, align3d=False, fix_scale=True, origin_zero=False):
     """
-    Align by rotating so that angle(gt[t]) = angle(out[t]), relative to the
+    Align `out` to `gt` by rotating so that angle(gt[t]) = angle(out[t]), relative to the
     origin at some timestamp t, which is, determined as e.g, 1/3 of the
-    session length
+    session length. Negative value means the alignment is done using the whole segment.
     """
-    if len(out) <= 0 or len(gt) <= 0: return out
+    out_rotation = None
+    if len(out) <= 0 or len(gt) <= 0: return out, out_rotation
 
-    out_part, gt_part = get_overlapping_xyz_parts_on_same_time_grid(out, gt)
-    if out_part.shape[0] <= 0: return out
+    out_part, gt_part = getOverlap(out, gt)
+    if out_part.shape[0] <= 0: return out, out_rotation
 
-    if fix_origin:
+    if origin_zero:
+        gt_ref = 0 * gt_part[0, :]
+        out_ref = 0 * out_part[0, :]
+    elif fix_origin:
         gt_ref = gt_part[0, :]
         out_ref = out_part[0, :]
     else:
@@ -126,7 +117,7 @@ def align_to_gt(out, gt, rel_align_time=1/3.0, fix_origin=True, align3d=False, f
         out_xyz = (out_part - out_ref).transpose()
         gt_xyz = (gt_part - gt_ref).transpose()
 
-        if out_xyz.shape[1] <= 0: return out
+        if out_xyz.shape[1] <= 0: return out, out_rotation
 
         if fix_scale:
             scale = 1
@@ -146,7 +137,7 @@ def align_to_gt(out, gt, rel_align_time=1/3.0, fix_origin=True, align3d=False, f
 
         aligned = out * 1
         aligned[:, 1:4] = np.dot(R, (out[:, 1:] - out_ref).transpose()).transpose() + gt_ref
-        return aligned
+        return aligned, out_rotation
 
     # else align in 2d
     # represent track XY as complex numbers
@@ -186,22 +177,21 @@ def align_to_gt(out, gt, rel_align_time=1/3.0, fix_origin=True, align3d=False, f
     aligned[:,1] = np.real(align_xy)
     aligned[:,2] = np.imag(align_xy)
     aligned[:,1:] += gt_ref
-    return aligned
+    out_rotation = np.angle(rot)
+    return aligned, out_rotation
 
-def piecewise_align_to_gt(out, gt, piece_len_sec=10.0, na_breaks=False):
+def piecewiseAlign(out, gt, piece_len_sec=10.0, na_breaks=False):
+    """ Align `out` in pieces so that they match `gt`. """
     gt_t = gt[:,0]
     out_t = out[:,0]
     max_t = np.max(gt_t)
-    #n_pieces = int(np.ceil(max_t / piece_len_sec))
     t = np.min(gt_t)
     aligned = []
     while t < max_t:
         t1 = t + piece_len_sec
-        #print t
-        #print t1
         gt_slice = gt[(gt_t >= t) & (gt_t < t1), :]
         out_slice = out[(out_t >= t) & (out_t < t1), :]
-        aligned_slice = align_to_gt(out_slice, gt_slice)
+        aligned_slice, _ = align(out_slice, gt_slice, rel_align_time=-1, fix_origin=False)
         aligned.append(aligned_slice)
         if na_breaks:
             na_spacer = aligned_slice[-1:,:]
@@ -213,359 +203,422 @@ def piecewise_align_to_gt(out, gt, piece_len_sec=10.0, na_breaks=False):
 
 def rmse(a, b):
     """Root Mean Square Error"""
+    assert(a.size != 0 and b.size != 0)
     return np.sqrt(np.mean(np.sum((a - b)**2, axis=1)))
 
-def mean_absolute_error(a, b):
+def meanAbsoluteError(a, b):
     """Mean Absolute Error (MAE)"""
+    assert(a.size != 0 and b.size != 0)
     return np.mean(np.sqrt(np.sum((a - b)**2, axis=1)))
 
-def compute_piecewise_metric(out, gt, piece_len_sec=10.0, measureZError=True):
+def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     """RMSE of the aligned XY track (in ground truth time grid)"""
-    aligned = piecewise_align_to_gt(out, gt, piece_len_sec)
+    assert(pieceLenSecs > 0)
+    if out.size == 0 or gt.size == 0:
+        return None
+    aligned = piecewiseAlign(out, gt, pieceLenSecs)
+    if aligned.size == 0:
+        return None
     if not measureZError:
         aligned = aligned[:,:-1]
         gt = gt[:,:-1]
-    interpolated, gt = get_overlapping_xyz_parts_on_same_time_grid(aligned, gt)
-    return rmse(gt, interpolated)
+    interpolated, gt = getOverlap(aligned, gt)
+    if interpolated.size == 0 or gt.size == 0:
+        return None
+    # In random walk noise, the standard deviance is proportional to elapsed time.
+    normalizedRmse = PIECEWISE_METRIC_SCALE * rmse(gt, interpolated) / np.sqrt(pieceLenSecs)
+    return normalizedRmse
 
-def compute_metric_set(out, gt, metric_set):
-    if metric_set in ['default', 'xy_only']:
-        measureZError = metric_set != 'xy_only'
-        return OrderedDict([
-            ("1s", compute_piecewise_metric(out, gt, 1.0, measureZError)),
-            ("10s", compute_piecewise_metric(out, gt, 10.0, measureZError)),
-            ("30s", compute_piecewise_metric(out, gt, 30.0, measureZError)),
-            ("100s", compute_piecewise_metric(out, gt, 100.0, measureZError))
-        ])
-    elif metric_set.startswith('full_'):
-        aligned = align_to_gt(out, gt, -1, **metric_set_to_alignment_params(metric_set))
-        aligned, gt = get_overlapping_xyz_parts_on_same_time_grid(aligned, gt)
-        return OrderedDict([
-            ('RMSE', rmse(gt, aligned)),
-            ('MAE', mean_absolute_error(gt, aligned))
-        ])
+# Align 3-vectors such as velocity and angular velocity using rotation that matches the position tracks.
+def alignWithTrackRotation(vioData, vioPosition, gtPosition):
+    from scipy.spatial.transform import Rotation
+
+    _ , angle = align(vioPosition, gtPosition, -1, **metricSetToAlignmentParams(Metric.FULL))
+    if angle is None: return vioData
+    R = Rotation.from_euler('z', angle).as_matrix()
+    out = []
+    for i in range(0, vioData.shape[0]):
+        x = R.dot(vioData[i, 1:])
+        out.append([vioData[i, 0], x[0], x[1], x[2]])
+    return np.array(out)
+
+def computeVelocityMetric(vio, gt):
+    computeAlignedVelocity(vio, gt)
+    vioPart, gtPart = getOverlap(vio["velocity"], gt["velocity"])
+    if gtPart.size == 0 or vioPart.size == 0: return None
+    return rmse(gtPart, vioPart)
+
+def computeAlignedVelocity(vio, gt):
+    ALIGN_DIRECTLY = False
+    vioV = computeVelocity(vio)
+    gtV = computeVelocity(gt)
+    if ALIGN_DIRECTLY:
+        vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
     else:
-        raise RuntimeError("Unknown metric set " + metric_set)
+        vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
 
-def average_metric(metrics):
-    total = 0.0
-    for x in metrics.values():
-        total += x
-    return total / len(metrics)
+    vio["velocity"] = vioVAligned
+    gt["velocity"] = gtV
 
-def metrics_to_string(metrics, short=True):
-    mean = "{:.3g}".format(np.mean([metrics[x] for x in metrics]))
-    submetrics = " | ".join(["{:.3g}".format(metrics[x]) for x in metrics])
-    met = "{} -- ({})".format(mean, submetrics)
-    if short:
-        return met
-    legend = " | ".join([x for x in metrics])
-    return "{} -- ({})".format(met, legend)
+def computeVelocity(data):
+    FILTER_SPIKES = True
+    USE_PRECOMPUTED_VELOCITIES = True
+    if USE_PRECOMPUTED_VELOCITIES and "velocity" in data and data["velocity"].shape[0] > 0:
+        return data["velocity"]
+    p = data["position"]
+    vs = []
+    i = 0
+    for i in range(1, p.shape[0]):
+        dt = p[i, 0] - p[i - 1, 0]
+        if dt <= 0: continue
+        dp = p[i, 1:] - p[i - 1, 1:]
+        if FILTER_SPIKES and np.linalg.norm(dp) > 0.1: continue
+        v = dp / dt
+        vs.append([p[i, 0], v[0], v[1], v[2]])
+    return np.array(vs)
 
+def computeAngularVelocityMetric(vio, gt):
+    computeAlignedAngularVelocity(vio, gt)
+    vioPart, gtPart = getOverlap(vio["angularVelocity"], gt["angularVelocity"])
+    if gtPart.size == 0 or vioPart.size == 0: return None
+    return rmse(gtPart, vioPart)
 
-def agg_metrics(metrics):
-    result = OrderedDict()
-    for x in metrics[0]:
-        result[x] = np.mean(list(map(lambda i: i[x], metrics)))
-    return result
+def computeAlignedAngularVelocity(vio, gt):
+    ALIGN_DIRECTLY = False
+    vioAv = computeAngularVelocity(vio)
+    gtAv = computeAngularVelocity(gt)
+    if ALIGN_DIRECTLY:
+        vioAvAligned, _ = align(vioAv, gtAv, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
+    else:
+        vioAvAligned = alignWithTrackRotation(vioAv, vio["position"], gt["position"])
+    vio["angularVelocity"] = vioAvAligned
+    gt["angularVelocity"] = gtAv
 
+def computeAngularVelocity(data):
+    USE_PRECOMPUTED_ANGULAR_VELOCITIES = True
+    if USE_PRECOMPUTED_ANGULAR_VELOCITIES and "angularVelocity" in data and data["angularVelocity"].shape[0] > 0:
+        # There can be large spikes in SDK's output in the very beginning. Ignore them because
+        # in practice the angular velocities are not used for anything critical in that time frame.
+        SKIP_SECONDS_FROM_BEGINNING = 0.1
+        avs = data["angularVelocity"]
+        t = avs[:, 0]
+        t0 = avs[0, 0] + SKIP_SECONDS_FROM_BEGINNING
+        return avs[t > t0, :]
 
-def read_gt(fn):
-    d = np.genfromtxt(fn, delimiter=',')
-    txyz = np.hstack([d[:,i][:,np.newaxis] for i in [0,1,3,2]])
-    txyz[:,1] = -txyz[:,1]
-    return {"datasets": [{"name": "groundTruth", "data": txyz}]}
+    from scipy.spatial.transform import Rotation
 
+    # Like `odometry::util::computeAngularVelocity()` from C++, but takes
+    # output-to-world quaternions rather than world-to-output, which is
+    # why the `inv()` (conjugate) calls are swapped.
+    def angularVelocity(qa, qb, ta, tb):
+        dt = tb - ta
+        if dt <= 0: return None
+        q = (Rotation.from_quat(qb) * Rotation.from_quat(qa).inv()).as_quat()
+        if q[3] < 0: q = -q
+        theta = 2 * math.acos(q[3])
+        if theta > 1e-6:
+            c = theta / math.sin(0.5 * theta)
+        else:
+            c = 2.0
+        r = c * q[:3] / dt
+        # Use `tb` to match SDK formula and get better alignment and metrics.
+        return [tb, r[0], r[1], r[2]]
 
-def read_gt_json(fn, comparisonList):
+    q = data["orientation"]
+    avs = []
+    i = 0
+    for i in range(1, q.shape[0]):
+        av = angularVelocity(q[i - 1, 1:], q[i, 1:], q[i - 1, 0], q[i, 0])
+        if not av: continue
+        avs.append(av)
+    return np.array(avs)
+
+def computeCoverage(out, gt, info):
+    if not "videoTimeSpan" in info or not info["videoTimeSpan"]: return None
+    if gt.size == 0: return None
+    if out.size == 0: return 0.0
+    # Use range of video input as the target, since in some datasets the ground truth
+    # samples cover a longer segment, which then makes getting the full coverage score impossible.
+    t0 = info["videoTimeSpan"][0]
+    t1 = info["videoTimeSpan"][1]
+    lengthSeconds = t1 - t0
+    assert(lengthSeconds >= 0)
+    t = t0
+    outInd = 0
+    gap = 0.0
+    assert(out.shape[0] >= 1)
+    while outInd < out.shape[0]:
+        tVio = out[outInd, 0]
+        dt = tVio - t
+        if dt > COVERAGE_GAP_THRESHOLD_SECONDS:
+            gap += dt
+        t = tVio
+        outInd += 1
+    dt = t1 - tVio
+    if dt > COVERAGE_GAP_THRESHOLD_SECONDS:
+        gap += dt
+    assert(gap <= lengthSeconds)
+    coverage = (lengthSeconds - gap) / lengthSeconds
+    assert(coverage >= 0.0 and coverage <= 1.0)
+    return coverage
+
+# Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
+def computeMetricSets(vio, vioPostprocessed, gt, info):
+    metricSets = info["metricSets"]
+    metrics = {}
+    for metricSetStr in metricSets:
+        metricSet = Metric(metricSetStr)
+        if metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
+            measureZError = metricSet != Metric.PIECEWISE_NO_Z
+            m = {
+                "1s": computePiecewiseMetric(vio["position"], gt["position"], 1.0, measureZError),
+                "10s": computePiecewiseMetric(vio["position"], gt["position"], 10.0, measureZError),
+                "30s": computePiecewiseMetric(vio["position"], gt["position"], 30.0, measureZError),
+                "100s": computePiecewiseMetric(vio["position"], gt["position"], 100.0, measureZError),
+            }
+            if None in m.values(): m = None
+            metrics[metricSetStr] = m
+        elif metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+            alignedVio, _ = align(vio["position"], gt["position"], -1, **metricSetToAlignmentParams(metricSet))
+            alignedVio, unalignedGt = getOverlap(alignedVio, gt["position"])
+            if unalignedGt.size > 0 and alignedVio.size > 0:
+                metrics[metricSetStr] = {
+                    "RMSE": rmse(unalignedGt, alignedVio),
+                    "MAE": meanAbsoluteError(unalignedGt, alignedVio),
+                }
+            else:
+                metrics[metricSetStr] = None
+        elif metricSet == Metric.COVERAGE:
+            metrics[metricSetStr] = computeCoverage(vio["position"], gt["position"], info)
+        elif metricSet == Metric.VELOCITY:
+            metrics[metricSetStr] = computeVelocityMetric(vio, gt)
+        elif metricSet == Metric.ANGULAR_VELOCITY:
+            metrics[metricSetStr] = computeAngularVelocityMetric(vio, gt)
+        elif metricSet == Metric.POSTPROCESSED:
+            if vioPostprocessed:
+                # Note that compared to the other metrics, the order of arguments is swapped
+                # so that the (sparse) time grid of postprocessed VIO is used.
+                alignedGt, _ = align(gt["position"], vioPostprocessed["position"], -1, **metricSetToAlignmentParams(metricSet))
+                alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
+                if alignedGt.size > 0 and unalignedVio.size > 0:
+                    metrics[metricSetStr] = rmse(alignedGt, unalignedVio)
+                else:
+                    metrics[metricSetStr] = None
+        elif metricSet == Metric.CPU_TIME:
+            metrics[metricSetStr] = None
+            if "cpuTime" in info: metrics[metricSetStr] = info["cpuTime"]
+        else:
+            raise Exception("Unimplemented metric {}".format(metricSetStr))
+    return metrics
+
+def readDatasetsCsv(fn):
+    return [{"name": "groundTruth", "position": np.genfromtxt(fn, delimiter=',')}]
+
+def readDatasetsJson(fn, include=[], exclude=[]):
     with open(fn) as f:
-        data = json.load(f)
-        # Filter out datasets we don't want to compare with if comparisonList is not falsey
-        if comparisonList:
-            lowerCaseList = [x.lower() for x in comparisonList.split(",")]
-            sortedDatasets = []
-            for s in lowerCaseList:
-                for d in data['datasets']:
-                    if d["name"].lower() == s:
-                        sortedDatasets.append(d)
-            data['datasets'] = sortedDatasets
-        # data['datasets'] = [x for x in data['datasets'] if not (comparisonList and not x["name"].lower() in [x.lower() for x in comparisonList.split(",")])]
-        for dataset in data['datasets']:
-            # Perform same tricks as def read_gt(fn):
-            d = np.array(dataset['data'])
-            txyz = np.hstack([d[:,i][:,np.newaxis] for i in [0,1,3,2]])
-            txyz[:,1] = -txyz[:,1]
-            dataset['data'] = txyz
-        return data
+        data = json.load(f)["datasets"]
+    filteredData = []
+    for dataset in data:
+        name = dataset["name"].lower()
+        if include and not name in include: continue
+        if name in exclude: continue
 
+        position = []
+        orientation = []
+        for d in dataset["data"]:
+            position.append([d["time"], d["position"]["x"], d["position"]["y"], d["position"]["z"]])
+            if "orientation" in d:
+                q = d["orientation"]
+                orientation.append([d["time"], q["x"], q["y"], q["z"], q["w"]]) # Scipy ordering.
+        filteredData.append({
+            "name": dataset["name"],
+            "position": np.array(position),
+            "orientation": np.array(orientation),
+        })
+    return filteredData
 
-def read_out(fn):
+VIO_OUTPUT_CACHE = {}
+
+def readVioOutput(benchmarkFolder, caseName, postprocessed=False):
+    # Caching is not that beneficial here.
+    global VIO_OUTPUT_CACHE
+    baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
+    key = "{}+{}+{}".format(baseName, caseName, postprocessed)
+    if key in VIO_OUTPUT_CACHE: return VIO_OUTPUT_CACHE[key].copy()
+
+    if postprocessed:
+        outputPath = "{}/vio-output/{}_map.jsonl".format(benchmarkFolder, caseName)
+        if not pathlib.Path(outputPath).exists():
+            return {}
+    else:
+        outputPath = "{}/vio-output/{}.jsonl".format(benchmarkFolder, caseName)
+
+    def isValidVector(row, field):
+        if field not in row: return False
+        # VIO should not produce values like this, but they have been spotted.
+        # Crash rather than ignoring silently.
+        for c in "xyz":
+            if row[field][c] == None: raise Exception("Null values in VIO outputs.")
+        return True
+
     bias_norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     to_arr = lambda obj: [obj["x"], obj["y"], obj["z"]]
-    txyz = []
+    position = []
+    orientation = []
+    velocity = []
+    angularVelocity = []
     bga = []
     baa = []
     bat = []
     stat = []
-    with open(fn) as f:
+    idToTime = {}
+    loopClosures = []
+    resets = []
+    with open(outputPath) as f:
         for line in f.readlines():
             row = json.loads(line)
-            txyz.append([row["time"], row["position"]["x"], row["position"]["y"], row["position"]["z"]])
+            t = row["time"]
+            if t == None: continue
+            if not isValidVector(row, "position"): continue
+            position.append([t, row["position"]["x"], row["position"]["y"], row["position"]["z"]])
+            if isValidVector(row, "orientation"):
+                q = row["orientation"]
+                orientation.append([t, q["x"], q["y"], q["z"], q["w"]])
+            if isValidVector(row, "velocity"):
+                v = row["velocity"]
+                velocity.append([t, v["x"], v["y"], v["z"]])
+            if isValidVector(row, "angularVelocity"):
+                av = row["angularVelocity"]
+                angularVelocity.append([t, av["x"], av["y"], av["z"]])
             stat.append(row.get("stationary", False))
-            if (row.get("biasMean")):
+            if "biasMean" in row:
                 bga.append(to_arr(row["biasMean"]["gyroscopeAdditive"]))
                 baa.append(to_arr(row["biasMean"]["accelerometerAdditive"]))
                 if "accelerometerTransform" in row["biasMean"]:
                     bat.append(to_arr(row["biasMean"]["accelerometerTransform"]))
-    return {
-        'txyz': np.array(txyz),
+            if "id" in row:
+                idToTime[row["id"]] = t
+            if "loopClosureIds" in row:
+                for loopClosureId in row["loopClosureIds"]:
+                    if not loopClosureId in idToTime: continue
+                    # Save times rather than indices as they survive the align operations better.
+                    loopClosures.append([t, idToTime[loopClosureId]])
+            if "status" in row:
+                if row["status"] == "LOST_TRACKING": resets.append(t)
+
+    VIO_OUTPUT_CACHE[key] = {
+        'position': np.array(position),
+        'orientation': np.array(orientation),
+        'velocity': np.array(velocity),
+        'angularVelocity': np.array(angularVelocity),
         'BGA': bias_norm(np.array(bga)) if bga else 0.0,
         'BAA': bias_norm(np.array(baa)) if baa else 0.0,
         'BAT': bias_norm(np.array(bat) - 1.0) if bat else 0.0,
-        'stationary': np.array(stat)
+        'stationary': np.array(stat),
+        'loopClosures': loopClosures,
+        'resets': resets,
     }
+    return VIO_OUTPUT_CACHE[key].copy()
 
+OTHER_DATASETS_CACHE = {}
 
-def getHeight(dataset, ax):
-    return np.amax(dataset[:,ax]) - np.amin(dataset[:,ax])
+# `include` and `exclude` filter by dataset type. If `include` is empty, everything is included
+# before the `exclude` filter is applied.
+def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
+    # Caching provides a significant speed-up here.
+    global OTHER_DATASETS_CACHE
+    baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
+    key = "{}+{}+{}".format(baseName, caseName, "-".join(include))
+    if key in OTHER_DATASETS_CACHE: return OTHER_DATASETS_CACHE[key].copy()
 
-
-def doOffset(trackOffset, maxHeight, dataset, ax):
-    height = getHeight(dataset, ax)
-    dataset[:,ax] = dataset[:,ax] + (trackOffset - np.max(dataset[:,ax])) - (maxHeight - height) / 2
-    return trackOffset - maxHeight
-
-
-def exportTsvPaths(data, name):
-    with open(name + ".tsv", "w") as f:
-        f.write("time\tx\ty\tz\n")
-        for row in data:
-            f.write("{}\t{}\t{}\t{}\n".format(row[0], row[1], row[2], row[3]))
-
-
-def plot(benchmarkSet, gt, plot_axis, ax1=1, ax2=2, plot_title=None, gt_color='orange', piecewise=True, offsetTracks=False, exportPath=None, **alignment_kwargs):
-    import matplotlib.pyplot as plt
-    title_str = plot_title if plot_title else ""
-    if plot_axis is None:
-        axis = plt
-        is_subplot = False
+    gtJson = "{}/ground-truth/{}.json".format(benchmarkFolder, caseName)
+    gtCsv = "{}/ground-truth/{}.csv".format(benchmarkFolder, caseName)
+    if os.path.isfile(gtJson):
+        OTHER_DATASETS_CACHE[key] = readDatasetsJson(gtJson, include, exclude)
+    elif os.path.isfile(gtCsv):
+        OTHER_DATASETS_CACHE[key] = readDatasetsCsv(gtCsv)
     else:
-        axis = plot_axis
-        is_subplot = True
+        return []
+    return OTHER_DATASETS_CACHE[key].copy()
 
-    # Align data with ground truth
-    groundtruth = None
-    maxHeight = 0
-    if gt is not None:
-        groundtruth = gt['datasets'][0]['data']
-        if exportPath: exportTsvPaths(groundtruth, "{}/{}-{}".format(exportPath, title_str,  gt['datasets'][0]['name']))
-        # TODO: Use this all the time, because most of the time there is more horzontal space?
-        if offsetTracks: optimalRotation(groundtruth, ax1, ax2)
-        maxHeight = getHeight(groundtruth, ax2)
-        for dataset in gt['datasets'][1:]:
-            dataset['data'] = align_to_gt(dataset['data'], groundtruth, -1, **alignment_kwargs)
-            if exportPath: exportTsvPaths(dataset['data'], "{}/{}-{}".format(exportPath, title_str,  dataset['name']))
-            maxHeight = max(maxHeight, getHeight(dataset['data'], ax2))
-        for index, bench in enumerate(benchmarkSet["benchmarks"]):
-            bench["aligned"] = align_to_gt(bench["out"]['txyz'], groundtruth, -1, **alignment_kwargs)
-            if exportPath: exportTsvPaths(bench["aligned"], "{}/{}-{}".format(exportPath, title_str,  bench["paramSet"]))
-            maxHeight = max(maxHeight, getHeight(bench["aligned"], ax2))
-        maxHeight = maxHeight * 1.05 # 5% padding
+# Compute a single value that summarises the results, based on preference order
+# for the available metrics. If the most prefered metric computation has failed, output `None`
+# rather than falling back to another metric (as that would mess up averages across multiple cases).
+def computeSummaryValue(metricsJson):
+    for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
+        if not metricSet.value in metricsJson: continue
+        if not metricsJson[metricSet.value]: return None
+        return np.mean(list(metricsJson[metricSet.value].values()))
+    for metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+        if not metricSet.value in metricsJson: continue
+        if not metricsJson[metricSet.value]: return None
+        return metricsJson[metricSet.value]["RMSE"]
+    for metricSet in [Metric.POSTPROCESSED, Metric.COVERAGE, Metric.ANGULAR_VELOCITY, Metric.CPU_TIME]:
+        if not metricSet.value in metricsJson: continue
+        return metricsJson[metricSet.value]
+    return None
 
-    trackOffset = 0
+def setRelativeMetric(relative, metricSetStr, a, b):
+    if a is None or b is None or b <= 0: return
+    relative[metricSetStr] = a / b
 
-    # Draw ground truth and other external plots
-    if gt is not None:
-        axis.plot(groundtruth[:,ax1], groundtruth[:,ax2], label=gt['datasets'][0]['name'], color=getColor(gt['datasets'][0]['name']), linewidth=1)
-        trackOffset = np.amin(groundtruth[:,ax2])
-        for dataset in gt['datasets'][1:]:
-            if offsetTracks: trackOffset = doOffset(trackOffset, maxHeight, dataset['data'], ax2)
-            axis.plot(dataset['data'][:,ax1], dataset['data'][:,ax2], label=dataset['name'], color=getColor(dataset['name']), linewidth=1)
+# Computed the same way as in `computeSummaryValue()`.
+def computeRelativeMetrics(metrics, baseline):
+    def hasResults(kind, m):
+        return kind in m and m[kind]
 
-    # Draw results
-    for index, bench in enumerate(benchmarkSet["benchmarks"]):
-        if "aligned" in bench:
-            out = bench["aligned"]
-        else:
-            out = bench["out"]['txyz']
+    relative = {}
+    for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
+        metricSetStr = metricSet.value
+        if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
+            a = np.mean(list(metrics[metricSetStr].values()))
+            b = np.mean(list(baseline[metricSetStr].values()))
+            setRelativeMetric(relative, metricSetStr, a, b)
+    for metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+        metricSetStr = metricSet.value
+        if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
+            a = metrics[metricSetStr]["RMSE"]
+            b = baseline[metricSetStr]["RMSE"]
+            setRelativeMetric(relative, metricSetStr, a, b)
+    for metricSet in [Metric.COVERAGE, Metric.ANGULAR_VELOCITY, Metric.POSTPROCESSED, Metric.CPU_TIME]:
+        metricSetStr = metricSet.value
+        if not metricSetStr in metrics or not metricSetStr in baseline: continue
+        a = metrics[metricSetStr]
+        b = baseline[metricSetStr]
+        setRelativeMetric(relative, metricSetStr, a, b)
+    return relative
 
-        if offsetTracks: trackOffset = doOffset(trackOffset, maxHeight, out, ax2)
-        axis.plot(out[:,ax1], out[:,ax2], label=bench["paramSet"], color=getColor(index=index), linewidth=1.5)
+def computeMetrics(benchmarkFolder, caseName, baseline=None):
+    infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
+    with open(infoPath) as infoFile:
+        info = json.loads(infoFile.read())
 
-        if groundtruth is not None and piecewise:
-            pieces = piecewise_align_to_gt(out, groundtruth, 5.0, na_breaks=True)
-            axis.plot(pieces[:,ax1], pieces[:,ax2], label='Ours (parts)', color=getColor(index=4), alpha=0.2, linewidth=1)
+    datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
+    gt = datasets[0] if datasets else None
 
-        # Draw point information.
-        # out_full = bench["out"]
-        # if 'stationary' in out_full:
-        #     stat = out_full['stationary'] != 0
-        #     axis.scatter(out[stat,ax1], out[stat,ax2], s=5, color='magenta', alpha=0.3) #, label='stationary')
-        #     bad_bias = out_full['BAA'] > 1.0
-        #     warn_bias = out_full['BAA'] > 0.7
-        #     axis.scatter(out[warn_bias,ax1], out[warn_bias,ax2], s=5, color='red', alpha=0.1)
-        #     axis.scatter(out[bad_bias,ax1], out[bad_bias,ax2], s=5, color='red', alpha=0.5, label=('bad bias' if index == 0 else None))
+    vio = readVioOutput(benchmarkFolder, caseName, False)
+    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, True)
 
-        # Draw ruler
-        if offsetTracks and index == len(benchmarkSet["benchmarks"]) - 1:
-            scale = max(1, math.pow(10, math.floor(math.log(np.amax(out[:,ax1]) - np.amin(out[:,ax1]), 10))))
-            ruler_offset = np.array([np.amin(out[:,ax1]), np.amin(out[:,ax2])])
-            ruler = [[-scale * 2,0], [-scale,0]] + ruler_offset
-            axis.text(ruler_offset[0] - scale * 2, ruler_offset[1] + scale * 0.2, "{:.0f}m".format(scale))
-            axis.plot(ruler[:,0], ruler[:,1], color='black', alpha=1, linewidth=2)
+    if gt:
+        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info)
+        if baseline:
+            relative = computeRelativeMetrics(metricsJson, baseline)
+            metricsJson["relative"] = relative
+        metricsDir = "{}/metrics".format(benchmarkFolder)
+        pathlib.Path(metricsDir).mkdir(parents=True, exist_ok=True)
+        metricsPath = "{}/{}.json".format(metricsDir, caseName)
+        with open(metricsPath, "w") as metricsFile:
+            metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': ')))
+        return computeSummaryValue(metricsJson)
+    return None
 
-    # Draw legend
-    if is_subplot:
-        set_title = axis.title.set_text
-        for item in axis.get_xticklabels() + axis.get_yticklabels():
-            item.set_size(6)
-    else: set_title = axis.title
-    for case in benchmarkSet["benchmarks"]:
-        if case.get("metric"):
-            if title_str:
-                title_str += "\n"
-            hostname = case.get("hostname")
-            if hostname:
-                title_str += "[" + hostname + "] "
-            if case["paramSet"] != "DEFAULT":
-                title_str += case["paramSet"] + " "
-            title_str += metrics_to_string(case["metric"])
-    set_title(title_str)
-    axis.axis('equal')
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("benchmarkFolder")
+    parser.add_argument("caseName")
+    parser.add_argument('--baseline', default=None)
+    args = parser.parse_args()
 
-
-def figureSize(num_plots):
-    if num_plots < 10:
-        return (15,15)
-    if num_plots < 20:
-        return (20,20)
-    return (30,30)
-
-
-def compute_metrics(folder, casename=None, show_plot=None, z_axis=None, columns=0, figure_output=None, title=None,
-    metricFile=None, comparisonList=None, piecewise=False, offsetTracks=False, metric_set='default', exportAlignedData=False):
-    do_plot = show_plot or figure_output is not None
-    plot_kwargs = metric_set_to_alignment_params(metric_set)
-    if z_axis: plot_kwargs['ax2'] = 3
-
-    if exportAlignedData:
-        exportPath = folder + "/aligned"
-        Path(exportPath).mkdir(parents=True, exist_ok=True)
-    else:
-        exportPath = None
-
-    if do_plot:
-        if not show_plot:
-            import matplotlib
-            matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-
-    # Group all benchmarks by their original name or directory, they will share plot
-    benchmarkSets = {}
-    if not casename:
-        for x in os.walk(folder + "/info"):
-            for file in x[2]:
-                benchmarkInfo = json.loads(open(os.path.join(x[0], file)).read())
-                benchmarkSetName = benchmarkInfo.get("origName")
-                benchmarkSet = benchmarkSets.get(benchmarkSetName)
-                if not benchmarkSet:
-                    benchmarkSet = {"name": benchmarkSetName, "benchmarks": []}
-                    benchmarkSets[benchmarkSetName] = benchmarkSet
-                benchmarkSet["benchmarks"].append(benchmarkInfo)
-    else: # For single benchmarks
-        benchmarkSets[casename] = {
-            "name": casename,
-            "benchmarks": [
-                {
-                    "paramSet": "DEFAULT",
-                    "caseName": casename
-                }
-            ]
-        }
-
-    totalBenchmarks = len(benchmarkSets)
-    for x in benchmarkSets:
-        benchmarkSets[x]["benchmarks"] = sorted(benchmarkSets[x]["benchmarks"], key = lambda i: i['paramSet'])
-
-    metrics = {}
-
-    if do_plot:
-        n_per_row = columns
-        if n_per_row <= 0:
-            n_per_row = int(np.ceil(np.sqrt(totalBenchmarks)))
-        n_rows = int(np.ceil(float(totalBenchmarks) / n_per_row))
-        figure, subplots = plt.subplots(n_rows, n_per_row, figsize=figureSize(totalBenchmarks))
-        subplots = np.ravel(subplots)
-
-    for i, benchmarkSetName in enumerate(sorted(benchmarkSets.keys())):
-        benchmarkSet = benchmarkSets[benchmarkSetName]
-        setName = benchmarkSet["name"]
-        plot_kwargs['plot_title'] = setName
-        if do_plot:
-            plot_axis = subplots[i]
-        else:
-            plot_axis = None
-
-        # All parameter sets share groundtruth, so pick first one
-        gt_json = os.path.join(folder + "/ground-truth", benchmarkSet["benchmarks"][0]["caseName"] + ".json")
-        gt_csv = os.path.join(folder + "/ground-truth", benchmarkSet["benchmarks"][0]["caseName"] + ".csv")
-
-        gt = None
-        if os.path.isfile(gt_json):
-            if not comparisonList:
-                comparisonList = DEFAULT_COMPARISONS
-            gt = read_gt_json(gt_json, comparisonList)
-        elif os.path.isfile(gt_csv):
-            gt = read_gt(gt_csv)
-
-        # Add output and gt comparison metric to each benchmark case
-        for case in benchmarkSet["benchmarks"]:
-            name = case["caseName"]
-            case["out"] = read_out("{}/output/{}.jsonl".format(folder, name))
-            if gt:
-                case["metric"] = compute_metric_set(case["out"]['txyz'], gt['datasets'][0]['data'], metric_set)
-
-                # Save numeric results as JSON.
-                os.makedirs("{}/results".format(folder), exist_ok=True)
-                with open("{}/results/{}.json".format(folder, name), "w") as f:
-                    jsonResults = { "methods": {} }
-                    jsonResults["methods"]["our"] = case["metric"]
-                    jsonResults["duration"] = case.get("duration")
-                    jsonResults["frameCount"] = case.get("frameCount")
-                    if gt["datasets"]:
-                        jsonResults["groundTruth"] = gt["datasets"][0]["name"]
-                    # Compare other methods against the same ground truth.
-                    for i in range(1, len(gt["datasets"])):
-                        jsonResults["methods"][gt["datasets"][i]["name"]] = compute_metric_set(gt["datasets"][i]["data"], gt["datasets"][0]["data"], metric_set)
-                    json.dump(jsonResults, f, indent=4, sort_keys=True)
-
-                if metricFile:
-                    with open(metricFile, "a") as f: f.write("%s,%.9f\n" % (name, average_metric(case["metric"])))
-                if not metrics.get(case["paramSet"]):
-                    metrics[case["paramSet"]] = []
-                metrics[case["paramSet"]].append(case["metric"])
-        plot(benchmarkSet, gt, plot_axis, piecewise=piecewise, offsetTracks=offsetTracks, exportPath=exportPath, **plot_kwargs)
-        plot_axis.legend()
-
-    if do_plot:
-        for subplot in subplots[totalBenchmarks:]: subplot.axis('off')
-        suptitle = "\n".join(["{} {}".format(
-            setName,
-            metrics_to_string(agg_metrics(metrics[setName]), short=False))
-            for setName in sorted(metrics.keys())])
-        if title is not None:
-            suptitle = wordWrap(title) + "\n" +  suptitle
-        figure.suptitle(suptitle, fontsize=12)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        if figure_output: figure.savefig(figure_output)
-        if show_plot: plt.show()
-
-    # Return mean over everything
-    if metrics:
-        return np.mean([average_metric(agg_metrics(metrics[m])) for m in metrics])
-    else:
-        return None
-
-
-if __name__ == '__main__':
-    compute_metrics(**vars(parse_args()))
+    result = computeMetrics(args.benchmarkFolder, args.caseName, args.baseline)
+    print(result)
