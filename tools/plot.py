@@ -201,8 +201,8 @@ def plotLoopClosures(track, axis, ax1, ax2):
     p = track["position"]
     for ind, loopClosure in enumerate(track["loopClosures"]):
         label = "{} loop closures".format(len(track["loopClosures"])) if ind == 0 else None
-        plc = np.hstack([np.interp(loopClosure, p[:, 0], p[:, i])[:, np.newaxis] for i in range(4)])
-        axis.plot(plc[:, ax1], plc[:, ax2], color="deeppink", linewidth=2,
+        plc = np.hstack([np.interp(loopClosure[0:2], p[:, 0], p[:, i])[:, np.newaxis] for i in range(4)])
+        axis.plot(plc[:, ax1], plc[:, ax2], color=loopClosure[2], linewidth=2,
             marker="o", markersize=5, label=label)
 
 def plotResets(track, axis, ax1, ax2):
