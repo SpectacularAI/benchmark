@@ -501,7 +501,7 @@ def readVioOutput(benchmarkFolder, caseName, postprocessed=False):
             if "loopClosureIds" in row:
                 for i in range(len(row["loopClosureIds"])):
                     loopClosureId = row["loopClosureIds"][i]
-                    loopClosureLinkColor = row["loopClosureLinkColors"][i]
+                    loopClosureLinkColor = row["loopClosureLinkColors"][i] if "loopClosureLinkColors" in row else "deeppink"
                     if not loopClosureId in idToTime: continue
                     # Save times rather than indices as they survive the align operations better.
                     loopClosures.append((t, idToTime[loopClosureId], loopClosureLinkColor))
