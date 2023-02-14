@@ -102,6 +102,8 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
     if os.path.isfile(mainBinary) and runAndCapture("command -v shasum"):
         info["fingerprint"] = runAndCapture("shasum -a 256 " + mainBinary)
     info["system"] = runAndCapture("uname -a")
+    if args.set: info["set"] = args.set
+    if args.dataDir: info["dataDir"] = args.dataDir
 
     if args.gitDir:
         originalDir = os.getcwd()
