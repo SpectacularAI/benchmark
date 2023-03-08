@@ -49,14 +49,18 @@ class Metric(Enum):
     CPU_TIME = "cpu_time"
 
 def metricSetToAlignmentParams(metricSet):
-    if metricSet in [Metric.FULL, Metric.POSTPROCESSED, Metric.COVERAGE]:
-        return dict(fix_origin=False)
-    elif metricSet == Metric.FULL_3D:
-        return dict(fix_origin=False, align3d=True)
-    elif metricSet == Metric.FULL_3D_SCALED:
-        return dict(fix_origin=False, align3d=True, fix_scale=False)
-    elif metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
+    if metricSet in [
+        Metric.FULL,
+        Metric.POSTPROCESSED,
+        Metric.COVERAGE,
+        Metric.PIECEWISE,
+        Metric.PIECEWISE_NO_Z
+    ]:
         return {} # The defaults are correct.
+    elif metricSet == Metric.FULL_3D:
+        return dict(align3d=True)
+    elif metricSet == Metric.FULL_3D_SCALED:
+        return dict(align3d=True, fix_scale=False)
     elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
         return {} # No natural alignment for these.
     else:
@@ -84,7 +88,7 @@ def getOverlap(out, gt):
     out_part = np.hstack([np.interp(gt_part[:, 0], out_t, out[:,i])[:, np.newaxis] for i in range(out.shape[1])])
     return out_part[:, 1:], gt_part[:, 1:]
 
-def align(out, gt, rel_align_time=-1, fix_origin=True, align3d=False, fix_scale=True, origin_zero=False):
+def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False):
     """
     Align `out` to `gt` by rotating so that angle(gt[t]) = angle(out[t]), relative to the
     origin at some timestamp t, which is, determined as e.g, 1/3 of the
