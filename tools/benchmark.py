@@ -52,6 +52,7 @@ def getArgParser():
     parser.add_argument("-offsetTracks", help="When enabled, tracks are stacked instead of overlaid", action="store_true")
     parser.add_argument('-metricSet', type=str, default=DEFAULT_METRICS,
             help="One or more metric kinds, joined by comma, selected from: {}".format(", ".join(allMetrics)))
+    parser.add_argument("-fixOrigin", action="store_true", help="Force track starting positions to match for metrics and plots")
     parser.add_argument("-methodName", default="VIO", help="Name of the VIO method being benchmarked")
     parser.add_argument("-gitDir", help="Subfolder that should be used for saving git stats")
     parser.add_argument("-gitBranchName", help="Written to info.json")
@@ -319,6 +320,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "duration": duration,
             "frameCount": frameCount,
             "metricSets": metricSets,
+            "fixOrigin": args.fixOrigin,
             "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
