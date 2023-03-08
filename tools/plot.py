@@ -170,7 +170,7 @@ def plotAngularVelocity(args, vio, tracks, axis):
                 axis.plot(avs[:, 0], avs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
-def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed):
+def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
 
@@ -180,7 +180,8 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed):
         for ind, track in enumerate(tracks):
             if ind == gtInd: continue
             if not "position" in tracks[gtInd]: continue
-            track["position"], _ = align(track["position"], tracks[gtInd]["position"], -1, **kwargsAlign)
+            track["position"], _ = align(track["position"], tracks[gtInd]["position"], -1,
+                fix_origin=fixOrigin, **kwargsAlign)
 
     for ind, track in enumerate(tracks):
         marker = None
@@ -244,6 +245,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             caseInfoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
             with open(caseInfoPath) as caseInfoJsonFile:
                 caseInfo = json.loads(caseInfoJsonFile.read())
+            fixOrigin = "fixOrigin" in caseInfo and caseInfo["fixOrigin"]
 
             caseMetricsPath = "{}/metrics/{}.json".format(benchmarkFolder, caseName)
             if os.path.exists(caseMetricsPath):
@@ -269,11 +271,11 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
                 gtInd = len(tracks) - 1 if len(tracks) >= 2 else None
-                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed)
+                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
-                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed)
+                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
 
             # Draw legend
             for item in plotAxis.get_xticklabels() + plotAxis.get_yticklabels():

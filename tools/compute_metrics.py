@@ -369,6 +369,8 @@ def computeCoverage(out, gt, info):
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
 def computeMetricSets(vio, vioPostprocessed, gt, info):
     metricSets = info["metricSets"]
+    fixOrigin = "fixOrigin" in info and info["fixOrigin"]
+
     metrics = {}
     for metricSetStr in metricSets:
         metricSet = Metric(metricSetStr)
@@ -383,7 +385,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
             if None in m.values(): m = None
             metrics[metricSetStr] = m
         elif metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
-            alignedVio, _ = align(vio["position"], gt["position"], -1, **metricSetToAlignmentParams(metricSet))
+            alignedVio, _ = align(vio["position"], gt["position"], -1,
+                fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
             alignedVio, unalignedGt = getOverlap(alignedVio, gt["position"])
             if unalignedGt.size > 0 and alignedVio.size > 0:
                 metrics[metricSetStr] = {
@@ -402,7 +405,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
             if vioPostprocessed:
                 # Note that compared to the other metrics, the order of arguments is swapped
                 # so that the (sparse) time grid of postprocessed VIO is used.
-                alignedGt, _ = align(gt["position"], vioPostprocessed["position"], -1, **metricSetToAlignmentParams(metricSet))
+                alignedGt, _ = align(gt["position"], vioPostprocessed["position"], -1,
+                    fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
                 alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
                 if alignedGt.size > 0 and unalignedVio.size > 0:
                     metrics[metricSetStr] = rmse(alignedGt, unalignedVio)
