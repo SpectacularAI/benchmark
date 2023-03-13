@@ -23,6 +23,9 @@ SPARSITY_THRESHOLD = 1.0
 # If VIO has break longer than this, subtract the break length from the coverage metric.
 COVERAGE_GAP_THRESHOLD_SECONDS = 1.0
 
+# Levels for absolute error metric percentiles.
+PERCENTILES = [95, 100]
+
 class Metric(Enum):
     # For non-piecewise alignment, this is the "proper" metric for VIO methods that
     # rotates the track only around the z-axis since the VIO is supposed to be able
@@ -215,6 +218,17 @@ def meanAbsoluteError(a, b):
     assert(a.size != 0 and b.size != 0)
     return np.mean(np.sqrt(np.sum((a - b)**2, axis=1)))
 
+def computePercentiles(a, b, out):
+    """Absolute error below which given percentile of measurements fall"""
+    assert(a.size != 0 and b.size != 0)
+    err = np.sqrt(np.sum((a - b)**2, axis=1))
+    err.sort()
+    for p in PERCENTILES:
+        assert(p >= 0 and p <= 100)
+        ind = int((err.size - 1) * p / 100)
+        name = "max" if p == 100 else "p{}".format(p)
+        out[name] = err[ind]
+
 def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     """RMSE of the aligned XY track (in ground truth time grid)"""
     assert(pieceLenSecs > 0)
@@ -399,6 +413,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
                     "RMSE": rmse(unalignedGt, alignedVio),
                     "MAE": meanAbsoluteError(unalignedGt, alignedVio),
                 }
+                computePercentiles(unalignedGt, alignedVio, metrics[metricSetStr])
             else:
                 metrics[metricSetStr] = None
         elif metricSet == Metric.COVERAGE:
