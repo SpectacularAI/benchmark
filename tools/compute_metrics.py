@@ -368,6 +368,12 @@ def computeCoverage(out, gt, info):
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
 def computeMetricSets(vio, vioPostprocessed, gt, info):
+    pVio = vio["position"]
+    pGt = gt["position"]
+    if pVio.size > 0 and pGt.size > 0 and (pVio[0, 0] > pGt[-1, 0] or pVio[-1, 0] < pGt[0, 0]):
+        print("{}: VIO timestamps do not overlap with ground truth, cannot compute metrics or align."
+            .format(info["caseName"]))
+
     metricSets = info["metricSets"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
 
@@ -377,17 +383,17 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
         if metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
             measureZError = metricSet != Metric.PIECEWISE_NO_Z
             m = {
-                "1s": computePiecewiseMetric(vio["position"], gt["position"], 1.0, measureZError),
-                "10s": computePiecewiseMetric(vio["position"], gt["position"], 10.0, measureZError),
-                "30s": computePiecewiseMetric(vio["position"], gt["position"], 30.0, measureZError),
-                "100s": computePiecewiseMetric(vio["position"], gt["position"], 100.0, measureZError),
+                "1s": computePiecewiseMetric(pVio, pGt, 1.0, measureZError),
+                "10s": computePiecewiseMetric(pVio, pGt, 10.0, measureZError),
+                "30s": computePiecewiseMetric(pVio, pGt, 30.0, measureZError),
+                "100s": computePiecewiseMetric(pVio, pGt, 100.0, measureZError),
             }
             if None in m.values(): m = None
             metrics[metricSetStr] = m
         elif metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
-            alignedVio, _ = align(vio["position"], gt["position"], -1,
+            alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
-            alignedVio, unalignedGt = getOverlap(alignedVio, gt["position"])
+            alignedVio, unalignedGt = getOverlap(alignedVio, pGt)
             if unalignedGt.size > 0 and alignedVio.size > 0:
                 metrics[metricSetStr] = {
                     "RMSE": rmse(unalignedGt, alignedVio),
@@ -396,7 +402,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
             else:
                 metrics[metricSetStr] = None
         elif metricSet == Metric.COVERAGE:
-            metrics[metricSetStr] = computeCoverage(vio["position"], gt["position"], info)
+            metrics[metricSetStr] = computeCoverage(pVio, pGt, info)
         elif metricSet == Metric.VELOCITY:
             metrics[metricSetStr] = computeVelocityMetric(vio, gt)
         elif metricSet == Metric.ANGULAR_VELOCITY:
@@ -405,7 +411,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
             if vioPostprocessed:
                 # Note that compared to the other metrics, the order of arguments is swapped
                 # so that the (sparse) time grid of postprocessed VIO is used.
-                alignedGt, _ = align(gt["position"], vioPostprocessed["position"], -1,
+                alignedGt, _ = align(pGt, vioPostprocessed["position"], -1,
                     fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
                 alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
                 if alignedGt.size > 0 and unalignedVio.size > 0:
