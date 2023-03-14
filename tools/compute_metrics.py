@@ -69,6 +69,9 @@ def metricSetToAlignmentParams(metricSet):
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
 
+def percentileName(p):
+    return "max" if p == 100 else "p{}".format(p)
+
 def isSparse(out):
     n = out.shape[0]
     if n <= 1: return True
@@ -226,8 +229,7 @@ def computePercentiles(a, b, out):
     for p in PERCENTILES:
         assert(p >= 0 and p <= 100)
         ind = int((err.size - 1) * p / 100)
-        name = "max" if p == 100 else "p{}".format(p)
-        out[name] = err[ind]
+        out[percentileName(p)] = err[ind]
 
 def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     """RMSE of the aligned XY track (in ground truth time grid)"""
