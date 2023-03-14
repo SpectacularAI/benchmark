@@ -7,6 +7,7 @@ import os
 from .compute_metrics import readDatasets, readVioOutput, align, Metric, metricSetToAlignmentParams, isSparse
 from .compute_metrics import computeVelocity, computeAlignedVelocity
 from .compute_metrics import computeAngularVelocity, computeAlignedAngularVelocity
+from .compute_metrics import PERCENTILES, percentileName
 
 import numpy as np
 
@@ -93,8 +94,16 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
 
     if "RMSE" in metrics:
         s += "{:.3g}, {:.3g}".format(metrics["RMSE"], metrics["MAE"])
+        for p in PERCENTILES:
+            name = percentileName(p)
+            if name in metrics:
+                s += ", {:.3g}".format(metrics[name])
+            else:
+                s += ", N/A"
         if not short:
             s += " -- [rel RMSE] RMSE, MAE"
+            for p in PERCENTILES:
+                s += ", " + percentileName(p)
     else:
         mean = "{:.3g}".format(np.mean([metrics[x] for x in metrics]))
         submetrics = "|".join(["{:.2g}".format(metrics[x]) for x in metrics])
