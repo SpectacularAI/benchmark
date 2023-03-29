@@ -470,7 +470,7 @@ def readDatasetsJson(fn, include=[], exclude=[]):
 
 VIO_OUTPUT_CACHE = {}
 
-def readVioOutput(benchmarkFolder, caseName, postprocessed=False):
+def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
     # Caching is not that beneficial here.
     global VIO_OUTPUT_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
@@ -492,6 +492,10 @@ def readVioOutput(benchmarkFolder, caseName, postprocessed=False):
             if row[field][c] == None: raise Exception("Null values in VIO outputs.")
         return True
 
+
+    method = None
+    if "methodName" in info: method = info["methodName"].lower()
+
     bias_norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     to_arr = lambda obj: [obj["x"], obj["y"], obj["z"]]
     position = []
@@ -509,6 +513,8 @@ def readVioOutput(benchmarkFolder, caseName, postprocessed=False):
         for line in f.readlines():
             row = json.loads(line)
             t = row["time"]
+            if method and method in row:
+                row = row[method]
             if t == None: continue
             if not isValidVector(row, "position"): continue
             position.append([t, row["position"]["x"], row["position"]["y"], row["position"]["z"]])
@@ -629,8 +635,8 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None):
     datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
     gt = datasets[0] if datasets else None
 
-    vio = readVioOutput(benchmarkFolder, caseName, False)
-    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, True)
+    vio = readVioOutput(benchmarkFolder, caseName, info, False)
+    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, True)
 
     if gt:
         metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info)
