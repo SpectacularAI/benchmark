@@ -267,7 +267,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
             tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
             postprocessed = metricSet == Metric.POSTPROCESSED.value
-            vio = readVioOutput(benchmarkFolder, caseName, postprocessed)
+            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed)
 
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1

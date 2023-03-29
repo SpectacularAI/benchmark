@@ -317,6 +317,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "caseName": caseName,
             "dir": benchmark.dir,
             "paramSet": benchmark.paramSet,
+            "methodName": args.methodName,
             "duration": duration,
             "frameCount": frameCount,
             "metricSets": metricSets,
