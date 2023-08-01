@@ -142,6 +142,7 @@ TRACK_KINDS = {
     "realsense": "RealSense",
     "gps": "GPS",
     "rtkgps": "RTKGPS",
+    "externalPose": "externalPose",
 }
 
 DEVICE_TRANSFORM = {}
@@ -251,6 +252,7 @@ def convertComparisonData(casePaths, metricSets):
         # First found data type will be used as ground truth.
         kindsOrdered = [
             "groundTruth",
+            "externalPose",
             "ARKit",
             "arcore",
             "arengine",
@@ -338,8 +340,8 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         return False
 
     metricStr = "N/A" # Either no ground-truth or no VIO output.
-    if metric: metricStr = "{:.2f}".format(metric)
-    print("{:30} {:>6.0f}s   metric: {:>8}".format(caseName, duration, metricStr))
+    if metric: metricStr = "{:.3f}".format(metric)
+    print("{:40} {:>6.0f}s   metric: {:>8}".format(caseName, duration, metricStr))
     return vioSuccess
 
 def setupBenchmarkFromSetDescription(args, setName):

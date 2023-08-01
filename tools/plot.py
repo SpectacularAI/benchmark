@@ -24,7 +24,8 @@ EXTERNAL_COLORS = {
     'postprocessed': 'green',
     'realtime': 'deeppink',
     'gps': 'darkred',
-    'rtkgps': 'salmon'
+    'rtkgps': 'salmon',
+    'externalpose': 'salmon',
 }
 
 def getColor(datasetName="ours", index=0):
