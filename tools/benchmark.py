@@ -546,7 +546,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     for x in os.walk(results + "/metrics"):
         for caseMetricsJsonPath in x[2]:
             benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
-            caseName = caseMetricsJsonPath.split(".")[0]
+            caseName = caseMetricsJsonPath.rpartition(".")[0]
             assert(not caseName in metrics)
             metrics[caseName] = benchmarkMetrics
     ametrics = aggregateMetrics(list(metrics.values()))
