@@ -421,7 +421,7 @@ def computeOrientationErrors(vio, gt):
     for i in range(len(qVio)):
         q = qVio[i].as_matrix()
         g = qGt[i].as_matrix()
-        Q = g @ q.transpose()
+        Q = g.transpose() @ q
         totalAngle.append(np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)))
 
         # Project global gravity direction to local coordinates and compare.
