@@ -7,6 +7,7 @@ import os
 from .compute_metrics import readDatasets, readVioOutput, align, Metric, metricSetToAlignmentParams, isSparse
 from .compute_metrics import computeVelocity, computeAlignedVelocity
 from .compute_metrics import computeAngularVelocity, computeAlignedAngularVelocity
+from .compute_metrics import computeOrientationErrors
 from .compute_metrics import PERCENTILES, percentileName
 
 import numpy as np
@@ -180,6 +181,16 @@ def plotAngularVelocity(args, vio, tracks, axis):
                 axis.plot(avs[:, 0], avs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
+def plotOrientationErrors(args, vio, tracks, axis, full=False):
+    import matplotlib.pyplot as plt
+    if len(tracks) == 0:
+        return
+    orientationErrors = computeOrientationErrors(vio, tracks[0])
+    axis.plot(orientationErrors["time"], orientationErrors["total"], label="Total")
+    if full:
+        axis.plot(orientationErrors["time"], orientationErrors["gravity"], label="Gravity")
+        axis.plot(orientationErrors["time"], orientationErrors["heading"], label="Heading")
+
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
@@ -282,6 +293,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 # Align using the (sparse) postprocessed VIO time grid.
                 gtInd = len(tracks) - 1 if len(tracks) >= 2 else None
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
+            elif metricSet == Metric.ORIENTATION.value:
+                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis)
+            elif metricSet == Metric.ORIENTATION_FULL.value:
+                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, full=True)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -357,7 +372,7 @@ def plotBenchmark(args, benchmarkFolder):
             if metricSet == Metric.ANGULAR_VELOCITY.value: continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
-def makeAllPlots(results, excludePlots=""):
+def makeAllPlots(results, excludePlots="", debug=False):
     import argparse
     parser = argparse.ArgumentParser()
     plotArgs = parser.parse_args([])
@@ -374,6 +389,9 @@ def makeAllPlots(results, excludePlots=""):
             try:
                 plotBenchmark(plotArgs, results)
             except Exception as e:
+                if debug:
+                    import traceback
+                    print(traceback.format_exc())
                 print("plotBenchmark() failed for {}: {}".format(caseName, e))
 
     try:
