@@ -441,7 +441,7 @@ def computeOrientationErrors(vio, gt):
     }
 
 def computeOrientationErrorMetric(vio, gt, full=False):
-    if gt:
+    if gt and len(gt.get("orientation", [])) > 0:
         def rmseAngle(a):
             return np.sqrt(np.mean(np.array(a)**2))
         orientationErrors = computeOrientationErrors(vio, gt)

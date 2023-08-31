@@ -183,7 +183,7 @@ def plotAngularVelocity(args, vio, tracks, axis):
 
 def plotOrientationErrors(args, vio, tracks, axis, full=False):
     import matplotlib.pyplot as plt
-    if len(tracks) == 0:
+    if len(tracks) == 0 or len(tracks[0].get("orientation", [])) == 0:
         return
     orientationErrors = computeOrientationErrors(vio, tracks[0])
     axis.plot(orientationErrors["time"], orientationErrors["total"], label="Total")
