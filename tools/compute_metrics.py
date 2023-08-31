@@ -50,6 +50,10 @@ class Metric(Enum):
     POSTPROCESSED = "postprocessed"
     # Output from UNIX `time` command (not wall time).
     CPU_TIME = "cpu_time"
+    # Orientation error
+    ORIENTATION = "orientation"
+    # Orientation error, including error split by gravity and heading
+    ORIENTATION_FULL = "orientation_full"
 
 def metricSetToAlignmentParams(metricSet):
     if metricSet in [
@@ -94,7 +98,7 @@ def getOverlap(out, gt):
     out_part = np.hstack([np.interp(gt_part[:, 0], out_t, out[:,i])[:, np.newaxis] for i in range(out.shape[1])])
     return out_part[:, 1:], gt_part[:, 1:]
 
-def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False):
+def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False, return_rotation_matrix=False):
     """
     Align `out` to `gt` by rotating so that angle(gt[t]) = angle(out[t]), relative to the
     origin at some timestamp t, which is, determined as e.g, 1/3 of the
@@ -144,10 +148,12 @@ def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale
             flip = np.diag([1, 1, -1])
             R = np.dot(U, np.dot(flip, Vt))
         R *= scale
-
         aligned = out * 1
         aligned[:, 1:4] = np.dot(R, (out[:, 1:] - out_ref).transpose()).transpose() + gt_ref
-        return aligned, out_rotation
+        if return_rotation_matrix:
+            return aligned, out_rotation, R
+        else:
+            return aligned, out_rotation
 
     # else align in 2d
     # represent track XY as complex numbers
@@ -382,6 +388,80 @@ def computeCoverage(out, gt, info):
     assert(coverage >= 0.0 and coverage <= 1.0)
     return coverage
 
+# Compute orientation errors over time and distance
+def computeOrientationErrors(vio, gt):
+    from scipy.spatial.transform import Rotation, Slerp
+    tVio = vio["position"][:, 0]
+    tGt = gt["position"][:, 0]
+
+    # TODO: Support align3d=False?
+    # Find optimal rotation for trajectory to fit the ground truth
+    (_, _, worldRotation) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
+
+    # `Slerp` requires that the interpolation grid is inside the data time boundaries.
+    gtStartInd = 0
+    gtEndInd = len(tGt) - 1
+    while tGt[gtStartInd] < tVio[0]: gtStartInd += 1
+    while tGt[gtEndInd] > tVio[-1]: gtEndInd -= 1
+    assert(gtStartInd <= gtEndInd)
+    t = tGt[gtStartInd:gtEndInd+1]
+    distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd+1, 1:])
+
+    totalAngle = []
+    gravityAngle = []
+    headingAngle = []
+    qVio = Rotation.from_matrix(worldRotation) * Rotation.from_quat(vio["orientation"][:, 1:])
+    slerp = Slerp(tVio, qVio)
+
+    qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd+1, 1:])
+    qVio = slerp(t)
+    assert(len(qVio) == len(t))
+
+    GRAVITY_DIRECTION = np.array([0, 0, -1]) # TODO: This doesn't make much sense with align3d
+    for i in range(len(qVio)):
+        q = qVio[i].as_matrix()
+        g = qGt[i].as_matrix()
+        Q = g.transpose() @ q
+        totalAngle.append(np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)))
+
+        # Project global gravity direction to local coordinates and compare.
+        gravityAngle.append(np.arccos(np.dot(q.transpose() @ GRAVITY_DIRECTION, g.transpose() @ GRAVITY_DIRECTION)))
+
+        # Project local X axis to world XY plane and compare.
+        xq = q[:2, 0] / np.linalg.norm(q[:2, 0])
+        xg = g[:2, 0] / np.linalg.norm(g[:2, 0])
+        headingAngle.append(np.arccos(np.dot(xq, xg)))
+
+    return {
+        "time": t - t[0],
+        "dist": distGt,
+        "total": totalAngle,
+        "gravity": 180. / np.pi * np.array(gravityAngle),
+        "heading": 180. / np.pi * np.array(headingAngle),
+    }
+
+def computeOrientationErrorMetric(vio, gt, full=False):
+    if gt and len(gt.get("orientation", [])) > 0:
+        def rmseAngle(a):
+            return np.sqrt(np.mean(np.array(a)**2))
+        orientationErrors = computeOrientationErrors(vio, gt)
+        result = {
+            "RMSE total": rmseAngle(orientationErrors["total"]),
+        }
+        if full:
+            result["RMSE gravity"] = rmseAngle(orientationErrors["gravity"])
+            result["RMSE heading"] = rmseAngle(orientationErrors["heading"])
+        return result
+
+    return None
+
+# Compute cumulative sum of distance traveled. Output length matches input length.
+def traveledDistance(positions):
+    pDiff = np.diff(positions, axis=0)
+    pDiff = np.vstack((np.array([0, 0, 0]), pDiff))
+    dDiff = np.linalg.norm(pDiff, axis=1)
+    return np.cumsum(dDiff)
+
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
 def computeMetricSets(vio, vioPostprocessed, gt, info):
     pVio = vio["position"]
@@ -438,6 +518,10 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
         elif metricSet == Metric.CPU_TIME:
             metrics[metricSetStr] = None
             if "cpuTime" in info: metrics[metricSetStr] = info["cpuTime"]
+        elif metricSet == Metric.ORIENTATION:
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt)
+        elif metricSet == Metric.ORIENTATION_FULL:
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics

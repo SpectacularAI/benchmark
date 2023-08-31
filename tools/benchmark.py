@@ -58,6 +58,7 @@ def getArgParser():
     parser.add_argument("-gitBranchName", help="Written to info.json")
     parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
     parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
+    parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     return parser
 
 
@@ -168,7 +169,9 @@ def convertComparisonData(casePaths, metricSets):
     frameCount = 0
     datasets = {}
 
-    needsOrientation = Metric.ANGULAR_VELOCITY.value in metricSets
+    needsOrientation = (Metric.ANGULAR_VELOCITY.value in metricSets
+        or Metric.ORIENTATION.value in metricSets
+        or Metric.ORIENTATION_FULL.value in metricSets)
     if needsOrientation:
         # Import conditionally since scipy is otherwise not needed for benchmarking.
         from scipy.spatial.transform import Rotation
@@ -336,6 +339,9 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
     try:
         metric = computeMetrics(dirs.results, caseName, baseline)
     except Exception as e:
+        if args.debug:
+            import traceback
+            print(traceback.format_exc())
         print("computeMetrics() failed for {}: {}".format(caseName, e))
         return False
 
@@ -564,7 +570,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
-    makeAllPlots(results, args.excludePlots)
+    makeAllPlots(results, args.excludePlots, args.debug)
     # Print the elapsed time since the plotting has been quite slow in the past.
     print("… took {:.0f}s.".format(time.time() - startTime))
 
