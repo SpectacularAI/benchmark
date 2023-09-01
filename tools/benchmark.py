@@ -171,7 +171,8 @@ def convertComparisonData(casePaths, metricSets):
 
     needsOrientation = (Metric.ANGULAR_VELOCITY.value in metricSets
         or Metric.ORIENTATION.value in metricSets
-        or Metric.ORIENTATION_FULL.value in metricSets)
+        or Metric.ORIENTATION_FULL.value in metricSets
+        or Metric.ORIENTATION_ALIGNED.value in metricSets)
     if needsOrientation:
         # Import conditionally since scipy is otherwise not needed for benchmarking.
         from scipy.spatial.transform import Rotation

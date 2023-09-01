@@ -181,11 +181,11 @@ def plotAngularVelocity(args, vio, tracks, axis):
                 axis.plot(avs[:, 0], avs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
-def plotOrientationErrors(args, vio, tracks, axis, full=False):
+def plotOrientationErrors(args, vio, tracks, axis, full=False, alignTrajectory=True, alignOrientation=False):
     import matplotlib.pyplot as plt
     if len(tracks) == 0 or len(tracks[0].get("orientation", [])) == 0:
         return
-    orientationErrors = computeOrientationErrors(vio, tracks[0])
+    orientationErrors = computeOrientationErrors(vio, tracks[0], alignTrajectory, alignOrientation)
     axis.plot(orientationErrors["time"], orientationErrors["total"], label="Total")
     if full:
         axis.plot(orientationErrors["time"], orientationErrors["gravity"], label="Gravity")
@@ -297,6 +297,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis)
             elif metricSet == Metric.ORIENTATION_FULL.value:
                 if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, full=True)
+            elif metricSet == Metric.ORIENTATION_ALIGNED.value:
+                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, alignTrajectory=False, alignOrientation=True)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None

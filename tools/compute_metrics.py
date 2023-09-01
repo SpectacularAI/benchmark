@@ -54,6 +54,8 @@ class Metric(Enum):
     ORIENTATION = "orientation"
     # Orientation error, including error split by gravity and heading
     ORIENTATION_FULL = "orientation_full"
+    # Orientation error, orientation is first aligned with ground truth
+    ORIENTATION_ALIGNED = "orientation_aligned"
 
 def metricSetToAlignmentParams(metricSet):
     if metricSet in [
@@ -389,14 +391,14 @@ def computeCoverage(out, gt, info):
     return coverage
 
 # Compute orientation errors over time and distance
-def computeOrientationErrors(vio, gt):
+# * alignTrajectory = aligns 3D trajectory before computing orientation error
+# * alignOrientation = computes average rotation from vio->gt and applies that before computing orientation error
+def computeOrientationErrors(vio, gt, alignTrajectory=True, alignOrientation=False):
+    if alignTrajectory and alignOrientation: raise Exception("Can't use both align method simulatenously!")
+
     from scipy.spatial.transform import Rotation, Slerp
     tVio = vio["position"][:, 0]
     tGt = gt["position"][:, 0]
-
-    # TODO: Support align3d=False?
-    # Find optimal rotation for trajectory to fit the ground truth
-    (_, _, worldRotation) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
 
     # `Slerp` requires that the interpolation grid is inside the data time boundaries.
     gtStartInd = 0
@@ -410,12 +412,23 @@ def computeOrientationErrors(vio, gt):
     totalAngle = []
     gravityAngle = []
     headingAngle = []
-    qVio = Rotation.from_matrix(worldRotation) * Rotation.from_quat(vio["orientation"][:, 1:])
+    qVio = Rotation.from_quat(vio["orientation"][:, 1:])
     slerp = Slerp(tVio, qVio)
 
     qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd+1, 1:])
     qVio = slerp(t)
     assert(len(qVio) == len(t))
+
+    # Find optimal rotation for trajectory to fit the ground truth
+    if alignTrajectory:
+        (_, _, R) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
+        qVio = Rotation.from_matrix(R) * qVio
+    elif alignOrientation:
+        quaternions = np.array([(gtQ * vioQ.inv()).as_quat() for vioQ, gtQ in zip(qVio, qGt)])
+        A = sum([np.outer(q, q.T) for q in quaternions])
+        eigenvectors = np.linalg.eig(A)[1]
+        avgRotation = Rotation.from_quat(eigenvectors[:, 0])
+        qVio = avgRotation * qVio
 
     GRAVITY_DIRECTION = np.array([0, 0, -1]) # TODO: This doesn't make much sense with align3d
     for i in range(len(qVio)):
@@ -440,11 +453,11 @@ def computeOrientationErrors(vio, gt):
         "heading": 180. / np.pi * np.array(headingAngle),
     }
 
-def computeOrientationErrorMetric(vio, gt, full=False):
+def computeOrientationErrorMetric(vio, gt, full=False, alignTrajectory=True, alignOrientation=False):
     if gt and len(gt.get("orientation", [])) > 0:
         def rmseAngle(a):
             return np.sqrt(np.mean(np.array(a)**2))
-        orientationErrors = computeOrientationErrors(vio, gt)
+        orientationErrors = computeOrientationErrors(vio, gt, alignTrajectory, alignOrientation)
         result = {
             "RMSE total": rmseAngle(orientationErrors["total"]),
         }
@@ -522,6 +535,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt)
         elif metricSet == Metric.ORIENTATION_FULL:
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True)
+        elif metricSet == Metric.ORIENTATION_ALIGNED:
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignTrajectory=False, alignOrientation=True)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
