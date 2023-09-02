@@ -118,10 +118,10 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
 def plotVelocity(args, vio, tracks, axis):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        computeAlignedVelocity(vio, tracks[0])
+        computeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["velocity"] = computeVelocity(vio)
+        vio["velocity"] = computeVelocity(vio, args.sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
@@ -146,10 +146,10 @@ PLOT_NORM = False
 def plotAngularVelocity(args, vio, tracks, axis):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        computeAlignedAngularVelocity(vio, tracks[0])
+        computeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["angularVelocity"] = computeAngularVelocity(vio)
+        vio["angularVelocity"] = computeAngularVelocity(vio, args.sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
@@ -374,7 +374,7 @@ def plotBenchmark(args, benchmarkFolder):
             if metricSet == Metric.ANGULAR_VELOCITY.value: continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
-def makeAllPlots(results, excludePlots="", debug=False):
+def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
     import argparse
     parser = argparse.ArgumentParser()
     plotArgs = parser.parse_args([])
@@ -383,6 +383,7 @@ def makeAllPlots(results, excludePlots="", debug=False):
     varsPlotArgs["compactRotation"] = False
     varsPlotArgs["showPlot"] = False
     varsPlotArgs["excludePlots"] = excludePlots.split(",")
+    varsPlotArgs["sampleIntervalForVelocity"] = sampleIntervalForVelocity
     for x in os.walk(results + "/info"):
         for caseInfoJsonPath in x[2]:
             benchmarkInfo = json.loads(open(os.path.join(results, "info", caseInfoJsonPath)).read())

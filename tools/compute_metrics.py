@@ -270,16 +270,16 @@ def alignWithTrackRotation(vioData, vioPosition, gtPosition):
         out.append([vioData[i, 0], x[0], x[1], x[2]])
     return np.array(out)
 
-def computeVelocityMetric(vio, gt):
-    computeAlignedVelocity(vio, gt)
+def computeVelocityMetric(vio, gt, intervalSeconds=None):
+    computeAlignedVelocity(vio, gt, intervalSeconds)
     vioPart, gtPart = getOverlap(vio["velocity"], gt["velocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
 
-def computeAlignedVelocity(vio, gt):
+def computeAlignedVelocity(vio, gt, intervalSeconds=None):
     ALIGN_DIRECTLY = False
-    vioV = computeVelocity(vio)
-    gtV = computeVelocity(gt)
+    vioV = computeVelocity(vio, intervalSeconds)
+    gtV = computeVelocity(gt, intervalSeconds)
     if ALIGN_DIRECTLY:
         vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
     else:
@@ -288,12 +288,23 @@ def computeAlignedVelocity(vio, gt):
     vio["velocity"] = vioVAligned
     gt["velocity"] = gtV
 
-def computeVelocity(data):
+# If intervalSeconds is provided, the data is sampled at that rate to compute velocity from position
+# despite how high frequency it is, to prevent small delta time cause inaccuracies in velocity
+def computeVelocity(data, intervalSeconds=None):
     FILTER_SPIKES = True
     USE_PRECOMPUTED_VELOCITIES = True
     if USE_PRECOMPUTED_VELOCITIES and "velocity" in data and data["velocity"].shape[0] > 0:
         return data["velocity"]
-    p = data["position"]
+    if intervalSeconds:
+        p = []
+        prevT = None
+        for pos in data["position"]:
+            if prevT == None or pos[0] - prevT >= intervalSeconds:
+                prevT = pos[0]
+                p.append(pos)
+        p = np.array(p)
+    else:
+        p = data["position"]
     vs = []
     i = 0
     for i in range(1, p.shape[0]):
@@ -305,16 +316,16 @@ def computeVelocity(data):
         vs.append([p[i, 0], v[0], v[1], v[2]])
     return np.array(vs)
 
-def computeAngularVelocityMetric(vio, gt):
+def computeAngularVelocityMetric(vio, gt, intervalSeconds=None):
     computeAlignedAngularVelocity(vio, gt)
     vioPart, gtPart = getOverlap(vio["angularVelocity"], gt["angularVelocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
 
-def computeAlignedAngularVelocity(vio, gt):
+def computeAlignedAngularVelocity(vio, gt, intervalSeconds=None):
     ALIGN_DIRECTLY = False
-    vioAv = computeAngularVelocity(vio)
-    gtAv = computeAngularVelocity(gt)
+    vioAv = computeAngularVelocity(vio, intervalSeconds)
+    gtAv = computeAngularVelocity(gt, intervalSeconds)
     if ALIGN_DIRECTLY:
         vioAvAligned, _ = align(vioAv, gtAv, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
     else:
@@ -322,7 +333,7 @@ def computeAlignedAngularVelocity(vio, gt):
     vio["angularVelocity"] = vioAvAligned
     gt["angularVelocity"] = gtAv
 
-def computeAngularVelocity(data):
+def computeAngularVelocity(data, intervalSeconds=None):
     USE_PRECOMPUTED_ANGULAR_VELOCITIES = True
     if USE_PRECOMPUTED_ANGULAR_VELOCITIES and "angularVelocity" in data and data["angularVelocity"].shape[0] > 0:
         # There can be large spikes in SDK's output in the very beginning. Ignore them because
@@ -352,7 +363,17 @@ def computeAngularVelocity(data):
         # Use `tb` to match SDK formula and get better alignment and metrics.
         return [tb, r[0], r[1], r[2]]
 
-    q = data["orientation"]
+    if intervalSeconds:
+        q = []
+        prevT = None
+        for ori in data["orientation"]:
+            if prevT == None or ori[0] - prevT >= intervalSeconds:
+                prevT = ori[0]
+                q.append(ori)
+        q = np.array(q)
+    else:
+        q = data["orientation"]
+
     avs = []
     i = 0
     for i in range(1, q.shape[0]):
@@ -476,7 +497,7 @@ def traveledDistance(positions):
     return np.cumsum(dDiff)
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vio, vioPostprocessed, gt, info):
+def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity=None):
     pVio = vio["position"]
     pGt = gt["position"]
     if pVio.size > 0 and pGt.size > 0 and (pVio[0, 0] > pGt[-1, 0] or pVio[-1, 0] < pGt[0, 0]):
@@ -514,9 +535,9 @@ def computeMetricSets(vio, vioPostprocessed, gt, info):
         elif metricSet == Metric.COVERAGE:
             metrics[metricSetStr] = computeCoverage(pVio, pGt, info)
         elif metricSet == Metric.VELOCITY:
-            metrics[metricSetStr] = computeVelocityMetric(vio, gt)
+            metrics[metricSetStr] = computeVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.ANGULAR_VELOCITY:
-            metrics[metricSetStr] = computeAngularVelocityMetric(vio, gt)
+            metrics[metricSetStr] = computeAngularVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.POSTPROCESSED:
             if vioPostprocessed:
                 # Note that compared to the other metrics, the order of arguments is swapped
@@ -726,7 +747,7 @@ def computeRelativeMetrics(metrics, baseline):
         setRelativeMetric(relative, metricSetStr, a, b)
     return relative
 
-def computeMetrics(benchmarkFolder, caseName, baseline=None):
+def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVelocity=None):
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
@@ -738,7 +759,7 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None):
     vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, True)
 
     if gt:
-        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info)
+        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity)
         if baseline:
             relative = computeRelativeMetrics(metricsJson, baseline)
             metricsJson["relative"] = relative
@@ -756,7 +777,9 @@ if __name__ == "__main__":
     parser.add_argument("benchmarkFolder")
     parser.add_argument("caseName")
     parser.add_argument('--baseline', default=None)
+    parser.add_argument('--baseline', default=None)
+    parser.add_argument("--sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
     args = parser.parse_args()
 
-    result = computeMetrics(args.benchmarkFolder, args.caseName, args.baseline)
+    result = computeMetrics(args.benchmarkFolder, args.caseName, args.baseline, args.sampleIntervalForVelocity)
     print(result)

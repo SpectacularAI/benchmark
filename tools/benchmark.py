@@ -59,6 +59,7 @@ def getArgParser():
     parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
     parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
+    parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
     return parser
 
 
@@ -338,7 +339,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         baseline = baselineMetrics[caseName]
 
     try:
-        metric = computeMetrics(dirs.results, caseName, baseline)
+        metric = computeMetrics(dirs.results, caseName, baseline, args.sampleIntervalForVelocity)
     except Exception as e:
         if args.debug:
             import traceback
@@ -571,7 +572,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
-    makeAllPlots(results, args.excludePlots, args.debug)
+    makeAllPlots(results, args.excludePlots, args.debug, args.sampleIntervalForVelocity)
     # Print the elapsed time since the plotting has been quite slow in the past.
     print("… took {:.0f}s.".format(time.time() - startTime))
 
