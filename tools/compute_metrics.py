@@ -229,6 +229,39 @@ def meanAbsoluteError(a, b):
     assert(a.size != 0 and b.size != 0)
     return np.mean(np.sqrt(np.sum((a - b)**2, axis=1)))
 
+def getOverlapOrientations(vio, gt):
+    # TODO: Cache this
+    from scipy.spatial.transform import Rotation, Slerp
+    # `Slerp` requires that the interpolation grid is inside the data time boundaries.
+    tVio = vio["position"][:, 0]
+    tGt = gt["position"][:, 0]
+    gtStartInd = 0
+    gtEndInd = len(tGt) - 1
+    while tGt[gtStartInd] < tVio[0]: gtStartInd += 1
+    while tGt[gtEndInd] > tVio[-1]: gtEndInd -= 1
+    assert(gtStartInd <= gtEndInd)
+    gtOverlapTime = tGt[gtStartInd:gtEndInd+1]
+
+    qVio = Rotation.from_quat(vio["orientation"][:, 1:])
+    slerp = Slerp(tVio, qVio)
+
+    qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd+1, 1:])
+    slerpOrientations = slerp(gtOverlapTime)
+    assert(len(slerpOrientations) == len(gtOverlapTime))
+
+    quaternions = np.array([(gtQ * vioQ.inv()).as_quat() for vioQ, gtQ in zip(slerpOrientations, qGt)])
+    A = sum([np.outer(q, q.T) for q in quaternions])
+    eigenvectors = np.linalg.eig(A)[1]
+    avgRotation = Rotation.from_quat(eigenvectors[:, 0])
+
+    return {
+        "overlappinGtIndexes": (gtStartInd, gtEndInd),
+        "overlappingOrientation": qGt,
+        "overlappingGtTimes": gtOverlapTime,
+        "avgRotation": avgRotation,
+        "slerpVioOrientations": slerpOrientations
+    }
+
 def computePercentiles(a, b, out):
     """Absolute error below which given percentile of measurements fall"""
     assert(a.size != 0 and b.size != 0)
@@ -277,14 +310,12 @@ def computeVelocityMetric(vio, gt, intervalSeconds=None):
     return rmse(gtPart, vioPart)
 
 def computeAlignedVelocity(vio, gt, intervalSeconds=None):
-    ALIGN_DIRECTLY = False
     vioV = computeVelocity(vio, intervalSeconds)
     gtV = computeVelocity(gt, intervalSeconds)
-    if ALIGN_DIRECTLY:
-        vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
-    else:
-        vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
-
+    # vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=True, fix_scale=True, origin_zero=True)
+    # vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
+    vioVAligned = vioV
+    vioVAligned[:,1:] = getOverlapOrientations(vio, gt)["avgRotation"].apply(vioV[:,1:])
     vio["velocity"] = vioVAligned
     gt["velocity"] = gtV
 
@@ -317,19 +348,18 @@ def computeVelocity(data, intervalSeconds=None):
     return np.array(vs)
 
 def computeAngularVelocityMetric(vio, gt, intervalSeconds=None):
-    computeAlignedAngularVelocity(vio, gt)
+    computeAlignedAngularVelocity(vio, gt, intervalSeconds)
     vioPart, gtPart = getOverlap(vio["angularVelocity"], gt["angularVelocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
 
 def computeAlignedAngularVelocity(vio, gt, intervalSeconds=None):
-    ALIGN_DIRECTLY = False
     vioAv = computeAngularVelocity(vio, intervalSeconds)
     gtAv = computeAngularVelocity(gt, intervalSeconds)
-    if ALIGN_DIRECTLY:
-        vioAvAligned, _ = align(vioAv, gtAv, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
-    else:
-        vioAvAligned = alignWithTrackRotation(vioAv, vio["position"], gt["position"])
+    # vioAvAligned, _ = align(vioAv, gtAv, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
+    # vioAvAligned = alignWithTrackRotation(vioAv, vio["position"], gt["position"])
+    vioAvAligned = vioAv
+    vioAvAligned[:,1:] = getOverlapOrientations(vio, gt)["avgRotation"].apply(vioAv[:,1:])
     vio["angularVelocity"] = vioAvAligned
     gt["angularVelocity"] = gtAv
 
@@ -414,43 +444,32 @@ def computeCoverage(out, gt, info):
 # Compute orientation errors over time and distance
 # * alignTrajectory = aligns 3D trajectory before computing orientation error
 # * alignOrientation = computes average rotation from vio->gt and applies that before computing orientation error
-def computeOrientationErrors(vio, gt, alignTrajectory=True, alignOrientation=False):
-    if alignTrajectory and alignOrientation: raise Exception("Can't use both align method simulatenously!")
+class OrientationAlign(Enum):
+    # For non-piecewise alignment, this is the "proper" metric for VIO methods that
+    # rotates the track only around the z-axis since the VIO is supposed to be able
+    # to estimate direction of gravity (z-axis). The piecewise alignment methods are
+    # similar to this.
+    TRAJECTORY = "trajectory"
+    # This is the SE3 alignment commonly used in academic benchmarks (with RMSE).
+    AVERAGE_ORIENTATION = "average_orientation"
 
-    from scipy.spatial.transform import Rotation, Slerp
-    tVio = vio["position"][:, 0]
-    tGt = gt["position"][:, 0]
-
-    # `Slerp` requires that the interpolation grid is inside the data time boundaries.
-    gtStartInd = 0
-    gtEndInd = len(tGt) - 1
-    while tGt[gtStartInd] < tVio[0]: gtStartInd += 1
-    while tGt[gtEndInd] > tVio[-1]: gtEndInd -= 1
-    assert(gtStartInd <= gtEndInd)
-    t = tGt[gtStartInd:gtEndInd+1]
+def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
+    from scipy.spatial.transform import Rotation
+    overlap = getOverlapOrientations(vio, gt)
+    qGt = overlap["overlappingOrientation"]
+    (gtStartInd, gtEndInd) = overlap["overlappinGtIndexes"]
     distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd+1, 1:])
+
+    # Find optimal rotation for trajectory to fit the ground truth
+    if alignType == OrientationAlign.TRAJECTORY:
+        (_, _, R) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
+        qVio = Rotation.from_matrix(R) * overlap["slerpVioOrientations"]
+    else:
+        qVio = overlap["avgRotation"] * overlap["slerpVioOrientations"]
 
     totalAngle = []
     gravityAngle = []
     headingAngle = []
-    qVio = Rotation.from_quat(vio["orientation"][:, 1:])
-    slerp = Slerp(tVio, qVio)
-
-    qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd+1, 1:])
-    qVio = slerp(t)
-    assert(len(qVio) == len(t))
-
-    # Find optimal rotation for trajectory to fit the ground truth
-    if alignTrajectory:
-        (_, _, R) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
-        qVio = Rotation.from_matrix(R) * qVio
-    elif alignOrientation:
-        quaternions = np.array([(gtQ * vioQ.inv()).as_quat() for vioQ, gtQ in zip(qVio, qGt)])
-        A = sum([np.outer(q, q.T) for q in quaternions])
-        eigenvectors = np.linalg.eig(A)[1]
-        avgRotation = Rotation.from_quat(eigenvectors[:, 0])
-        qVio = avgRotation * qVio
-
     GRAVITY_DIRECTION = np.array([0, 0, -1]) # TODO: This doesn't make much sense with align3d
     for i in range(len(qVio)):
         q = qVio[i].as_matrix()
@@ -467,18 +486,18 @@ def computeOrientationErrors(vio, gt, alignTrajectory=True, alignOrientation=Fal
         headingAngle.append(np.arccos(np.dot(xq, xg)))
 
     return {
-        "time": t - t[0],
+        "time": overlap["overlappingGtTimes"] - overlap["overlappingGtTimes"][0],
         "dist": distGt,
         "total": totalAngle,
         "gravity": 180. / np.pi * np.array(gravityAngle),
         "heading": 180. / np.pi * np.array(headingAngle),
     }
 
-def computeOrientationErrorMetric(vio, gt, full=False, alignTrajectory=True, alignOrientation=False):
+def computeOrientationErrorMetric(vio, gt, full=False, alignType=None):
     if gt and len(gt.get("orientation", [])) > 0:
         def rmseAngle(a):
             return np.sqrt(np.mean(np.array(a)**2))
-        orientationErrors = computeOrientationErrors(vio, gt, alignTrajectory, alignOrientation)
+        orientationErrors = computeOrientationErrors(vio, gt, alignType)
         result = {
             "RMSE total": rmseAngle(orientationErrors["total"]),
         }
@@ -553,11 +572,11 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             metrics[metricSetStr] = None
             if "cpuTime" in info: metrics[metricSetStr] = info["cpuTime"]
         elif metricSet == Metric.ORIENTATION:
-            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt)
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.TRAJECTORY)
         elif metricSet == Metric.ORIENTATION_FULL:
-            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True)
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True, alignType=OrientationAlign.TRAJECTORY)
         elif metricSet == Metric.ORIENTATION_ALIGNED:
-            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignTrajectory=False, alignOrientation=True)
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.AVERAGE_ORIENTATION)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
