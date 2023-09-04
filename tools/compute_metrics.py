@@ -229,23 +229,27 @@ def meanAbsoluteError(a, b):
     assert(a.size != 0 and b.size != 0)
     return np.mean(np.sqrt(np.sum((a - b)**2, axis=1)))
 
+# Returns start and end (ex) indexes for source that are within target start and end
+def getIncludedOverlap(sourceTimes, targetTimes):
+    sourceStartInd = 0
+    sourceEndInd = len(sourceTimes) - 1
+    while sourceTimes[sourceStartInd] < targetTimes[0]: sourceStartInd += 1
+    while sourceTimes[sourceEndInd] > targetTimes[-1]: sourceEndInd -= 1
+    assert(sourceStartInd <= sourceEndInd)
+    return (sourceStartInd, sourceEndInd + 1)
+
 def getOverlapOrientations(vio, gt):
     # TODO: Cache this
     from scipy.spatial.transform import Rotation, Slerp
     # `Slerp` requires that the interpolation grid is inside the data time boundaries.
     tVio = vio["position"][:, 0]
     tGt = gt["position"][:, 0]
-    gtStartInd = 0
-    gtEndInd = len(tGt) - 1
-    while tGt[gtStartInd] < tVio[0]: gtStartInd += 1
-    while tGt[gtEndInd] > tVio[-1]: gtEndInd -= 1
-    assert(gtStartInd <= gtEndInd)
-    gtOverlapTime = tGt[gtStartInd:gtEndInd+1]
-
+    gtStartInd, gtEndInd = getIncludedOverlap(tGt, tVio)
+    gtOverlapTime = tGt[gtStartInd:gtEndInd]
     qVio = Rotation.from_quat(vio["orientation"][:, 1:])
     slerp = Slerp(tVio, qVio)
 
-    qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd+1, 1:])
+    qGt = Rotation.from_quat(gt["orientation"][gtStartInd:gtEndInd, 1:])
     slerpOrientations = slerp(gtOverlapTime)
     assert(len(slerpOrientations) == len(gtOverlapTime))
 
@@ -390,8 +394,7 @@ def computeAngularVelocity(data, intervalSeconds=None):
         else:
             c = 2.0
         r = c * q[:3] / dt
-        # Use `tb` to match SDK formula and get better alignment and metrics.
-        return [tb, r[0], r[1], r[2]]
+        return [(tb + ta) * .5, r[0], r[1], r[2]]
 
     if intervalSeconds:
         q = []
@@ -406,8 +409,8 @@ def computeAngularVelocity(data, intervalSeconds=None):
 
     avs = []
     i = 0
-    for i in range(1, q.shape[0]):
-        av = angularVelocity(q[i - 1, 1:], q[i, 1:], q[i - 1, 0], q[i, 0])
+    for i in range(1, q.shape[0] - 1):
+        av = angularVelocity(q[i - 1, 1:], q[i + 1, 1:], q[i - 1, 0], q[i + 1, 0])
         if not av: continue
         avs.append(av)
     return np.array(avs)
@@ -458,7 +461,7 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
     overlap = getOverlapOrientations(vio, gt)
     qGt = overlap["overlappingOrientation"]
     (gtStartInd, gtEndInd) = overlap["overlappinGtIndexes"]
-    distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd+1, 1:])
+    distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd, 1:])
 
     # Find optimal rotation for trajectory to fit the ground truth
     if alignType == OrientationAlign.TRAJECTORY:
