@@ -284,6 +284,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
             ax2 = 3 if args.z_axis else 2
+            noLegend=False
             if metricSet == Metric.ANGULAR_VELOCITY.value:
                 plotAngularVelocity(args, vio, tracks, plotAxis)
             elif metricSet == Metric.VELOCITY.value:
@@ -295,10 +296,13 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
             elif metricSet == Metric.ORIENTATION.value:
                 if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
+                else: noLegend = True
             elif metricSet == Metric.ORIENTATION_FULL.value:
                 if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
+                else: noLegend = True
             elif metricSet == Metric.ORIENTATION_ALIGNED.value:
                 if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+                else: noLegend = True
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -315,7 +319,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
                 titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
             plotAxis.title.set_text(titleStr)
-            plotAxis.legend()
+            if not noLegend: plotAxis.legend()
 
         except Exception as e:
             if caseCount > 1:
