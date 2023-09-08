@@ -35,6 +35,8 @@ COMPARE_POSTPROCESSED = False
 # Will be printed to VIO logs.
 CPU_TIME_MESSAGE = "CPU time (user sys percent)"
 
+DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY = 0.02
+
 def getArgParser():
     allMetrics = [m.value for m in list(Metric)]
 
@@ -59,7 +61,7 @@ def getArgParser():
     parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
     parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
-    parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
+    parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
     return parser
 
 
@@ -170,7 +172,8 @@ def convertComparisonData(casePaths, metricSets):
     frameCount = 0
     datasets = {}
 
-    needsOrientation = (Metric.ANGULAR_VELOCITY.value in metricSets
+    needsOrientation = (Metric.VELOCITY.value in metricSets
+        or Metric.ANGULAR_VELOCITY.value in metricSets
         or Metric.ORIENTATION.value in metricSets
         or Metric.ORIENTATION_FULL.value in metricSets
         or Metric.ORIENTATION_ALIGNED.value in metricSets)

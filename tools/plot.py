@@ -54,9 +54,14 @@ def wordWrap(s):
 def getFigurePath(root, metricSet=Metric.PIECEWISE, caseName=None, z_axis=None):
     figurePath = root
     if caseName: figurePath += "/{}".format(caseName)
-    if z_axis: figurePath += "-z-axis"
-    if Metric(metricSet) != Metric.PIECEWISE:
-        figurePath += "-{}".format(metricSet.replace("_", "-"))
+    if z_axis and Metric(metricSet) == Metric.ANGULAR_VELOCITY:
+        figurePath += "-angular-speed"
+    elif z_axis and Metric(metricSet) == Metric.VELOCITY:
+        figurePath += "-speed"
+    else:
+        if z_axis: figurePath += "-z-axis"
+        if Metric(metricSet) != Metric.PIECEWISE:
+            figurePath += "-{}".format(metricSet.replace("_", "-"))
     figurePath += ".png"
     return figurePath
 
@@ -115,7 +120,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " -- [rel mean] mean, ({})".format(legend)
     return s
 
-def plotVelocity(args, vio, tracks, axis):
+def plotVelocity(args, vio, tracks, axis, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
         computeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
@@ -135,15 +140,16 @@ def plotVelocity(args, vio, tracks, axis):
         vs = vs[(t > t0) & (t < t0 + 10), :]
 
         if vs.size == 0: continue
-        for ind in range(1, 4):
-            label = d['name'] if ind == 1 else None
-            axis.plot(vs[:, 0], vs[:, ind], label=label,
+        if speed:
+            axis.plot(vs[:, 0], np.linalg.norm(vs[:, 1:], axis=1), label=d['name'],
                 color=getColor(d['name']), linewidth=1)
+        else:
+            for ind in range(1, 4):
+                label = d['name'] if ind == 1 else None
+                axis.plot(vs[:, 0], vs[:, ind], label=label,
+                    color=getColor(d['name']), linewidth=1)
 
-PLOT_ORIENTATIONS = False
-PLOT_XY = False
-PLOT_NORM = False
-def plotAngularVelocity(args, vio, tracks, axis):
+def plotAngularVelocity(args, vio, tracks, axis, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
         computeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
@@ -163,17 +169,8 @@ def plotAngularVelocity(args, vio, tracks, axis):
         avs = avs[(t > t0) & (t < t0 + 10), :]
 
         if avs.size == 0: continue
-        if PLOT_ORIENTATIONS:
-            for ind in range(1, 5):
-                label = d['name'] if ind == 1 else None
-                axis.plot(d["orientation"][:, 0], d["orientation"][:, ind], label=label,
-                    color=getColor(d['name']), linewidth=1)
-        elif PLOT_XY:
-            axis.plot(avs[:, 1], avs[:, 2], label=d["name"],
-                color=getColor(d['name']), linewidth=1)
-        elif PLOT_NORM:
-            speed = np.linalg.norm(avs[:, 1:4], axis=1)
-            axis.plot(avs[:, 0], speed, label=d['name'],
+        if speed:
+            axis.plot(avs[:, 0], np.linalg.norm(avs[:, 1:4], axis=1), label=d['name'],
                 color=getColor(d['name']), linewidth=1)
         else:
             for ind in range(1, 4):
@@ -284,25 +281,24 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
             ax2 = 3 if args.z_axis else 2
-            noLegend=False
+
             if metricSet == Metric.ANGULAR_VELOCITY.value:
-                plotAngularVelocity(args, vio, tracks, plotAxis)
+                if not args.z_axis: plotAngularVelocity(args, vio, tracks, plotAxis)
+                else: plotAngularVelocity(args, vio, tracks, plotAxis, speed=True)
             elif metricSet == Metric.VELOCITY.value:
-                plotVelocity(args, vio, tracks, plotAxis)
+                if not args.z_axis: plotVelocity(args, vio, tracks, plotAxis)
+                else: plotVelocity(args, vio, tracks, plotAxis, speed=True)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
                 gtInd = len(tracks) - 1 if len(tracks) >= 2 else None
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
             elif metricSet == Metric.ORIENTATION.value:
-                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
-                else: noLegend = True
+                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_FULL.value:
-                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
-                else: noLegend = True
+                plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_ALIGNED.value:
-                if not args.z_axis: plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
-                else: noLegend = True
+                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -319,7 +315,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
                 titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
             plotAxis.title.set_text(titleStr)
-            if not noLegend: plotAxis.legend()
+            plotAxis.legend()
 
         except Exception as e:
             if caseCount > 1:
@@ -374,8 +370,9 @@ def plotBenchmark(args, benchmarkFolder):
         # TODO Plotting is somewhat slow. Could skip eg for CPU_TIME if there
         # was some other convenient way to present the results besides the aggregate figure.
         if args.z_axis:
-            if metricSet == Metric.VELOCITY.value: continue
-            if metricSet == Metric.ANGULAR_VELOCITY.value: continue
+            if metricSet == Metric.ORIENTATION.value: continue
+            if metricSet == Metric.ORIENTATION_FULL.value: continue
+            if metricSet == Metric.ORIENTATION_ALIGNED.value: continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
 def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
