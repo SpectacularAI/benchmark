@@ -26,6 +26,9 @@ COVERAGE_GAP_THRESHOLD_SECONDS = 1.0
 # Levels for absolute error metric percentiles.
 PERCENTILES = [95, 100]
 
+# How many seconds into future the position and orientation are predicted
+PREDICTION_SECONDS = 0.03
+
 class Metric(Enum):
     # For non-piecewise alignment, this is the "proper" metric for VIO methods that
     # rotates the track only around the z-axis since the VIO is supposed to be able
@@ -56,6 +59,8 @@ class Metric(Enum):
     ORIENTATION_FULL = "orientation_full"
     # Orientation error, orientation is first aligned with ground truth
     ORIENTATION_ALIGNED = "orientation_aligned"
+    # Error when predicting position and orientation forward in time
+    PREDICTION = "prediction"
 
 def metricSetToAlignmentParams(metricSet):
     if metricSet in [
@@ -84,7 +89,7 @@ def isSparse(out):
     lengthSeconds = out[-1, 0] - out[0, 0]
     return n / lengthSeconds < SPARSITY_THRESHOLD
 
-def getOverlap(out, gt):
+def getOverlap(out, gt, includeTime=False):
     """ Get overlapping parts of `out` and `gt` tracks on the time grid of `gt`. """
     if gt.size == 0 or out.size == 0:
         return np.array([]), np.array([])
@@ -98,7 +103,8 @@ def getOverlap(out, gt):
         max_t = min(np.max(out_t), np.max(gt_t))
         gt_part = gt[(gt_t >= min_t) & (gt_t <= max_t), :]
     out_part = np.hstack([np.interp(gt_part[:, 0], out_t, out[:,i])[:, np.newaxis] for i in range(out.shape[1])])
-    return out_part[:, 1:], gt_part[:, 1:]
+    if includeTime: return out_part[:, 1:], gt_part[:, 1:], out_part[:, 0]
+    else: return out_part[:, 1:], gt_part[:, 1:]
 
 def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False, return_rotation_matrix=False):
     """
@@ -308,20 +314,21 @@ def alignWithTrackRotation(vioData, vioPosition, gtPosition):
     return np.array(out)
 
 def computeVelocityMetric(vio, gt, intervalSeconds=None):
-    computeAlignedVelocity(vio, gt, intervalSeconds)
-    vioPart, gtPart = getOverlap(vio["velocity"], gt["velocity"])
+    preComputeAlignedVelocity(vio, gt, intervalSeconds)
+    vioPart, gtPart = getOverlap(vio["alignedVelocity"], gt["alignedVelocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
 
-def computeAlignedVelocity(vio, gt, intervalSeconds=None):
+def preComputeAlignedVelocity(vio, gt, intervalSeconds=None):
+    if "alignedVelocity" in vio and "alignedVelocity" in gt: return
     vioV = computeVelocity(vio, intervalSeconds)
     gtV = computeVelocity(gt, intervalSeconds)
     # vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=True, fix_scale=True, origin_zero=True)
     # vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
-    vioVAligned = vioV
+    vioVAligned = np.copy(vioV)
     vioVAligned[:,1:] = getOverlapOrientations(vio, gt)["avgRotation"].apply(vioV[:,1:])
-    vio["velocity"] = vioVAligned
-    gt["velocity"] = gtV
+    vio["alignedVelocity"] = vioVAligned
+    gt["alignedVelocity"] = gtV
 
 # If intervalSeconds is provided, the data is sampled at that rate to compute velocity from position
 # despite how high frequency it is, to prevent small delta time cause inaccuracies in velocity
@@ -352,20 +359,21 @@ def computeVelocity(data, intervalSeconds=None):
     return np.array(vs)
 
 def computeAngularVelocityMetric(vio, gt, intervalSeconds=None):
-    computeAlignedAngularVelocity(vio, gt, intervalSeconds)
-    vioPart, gtPart = getOverlap(vio["angularVelocity"], gt["angularVelocity"])
+    preComputeAlignedAngularVelocity(vio, gt, intervalSeconds)
+    vioPart, gtPart = getOverlap(vio["alignedAngularVelocity"], gt["alignedAngularVelocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
 
-def computeAlignedAngularVelocity(vio, gt, intervalSeconds=None):
+def preComputeAlignedAngularVelocity(vio, gt, intervalSeconds=None):
+    if "alignedAngularVelocity" in vio and "alignedAngularVelocity" in gt: return
     vioAv = computeAngularVelocity(vio, intervalSeconds)
     gtAv = computeAngularVelocity(gt, intervalSeconds)
     # vioAvAligned, _ = align(vioAv, gtAv, -1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=True)
     # vioAvAligned = alignWithTrackRotation(vioAv, vio["position"], gt["position"])
-    vioAvAligned = vioAv
+    vioAvAligned = np.copy(vioAv)
     vioAvAligned[:,1:] = getOverlapOrientations(vio, gt)["avgRotation"].apply(vioAv[:,1:])
-    vio["angularVelocity"] = vioAvAligned
-    gt["angularVelocity"] = gtAv
+    vio["alignedAngularVelocity"] = vioAvAligned
+    gt["alignedAngularVelocity"] = gtAv
 
 def computeAngularVelocity(data, intervalSeconds=None):
     USE_PRECOMPUTED_ANGULAR_VELOCITIES = True
@@ -453,8 +461,10 @@ class OrientationAlign(Enum):
     # to estimate direction of gravity (z-axis). The piecewise alignment methods are
     # similar to this.
     TRAJECTORY = "trajectory"
-    # This is the SE3 alignment commonly used in academic benchmarks (with RMSE).
+    # Find best alignment to match orientations in ground truth
     AVERAGE_ORIENTATION = "average_orientation"
+    # No alignment at all
+    NONE = "none"
 
 def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
     from scipy.spatial.transform import Rotation
@@ -463,12 +473,13 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
     (gtStartInd, gtEndInd) = overlap["overlappinGtIndexes"]
     distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd, 1:])
 
-    # Find optimal rotation for trajectory to fit the ground truth
     if alignType == OrientationAlign.TRAJECTORY:
         (_, _, R) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
         qVio = Rotation.from_matrix(R) * overlap["slerpVioOrientations"]
-    else:
+    elif alignType == OrientationAlign.AVERAGE_ORIENTATION:
         qVio = overlap["avgRotation"] * overlap["slerpVioOrientations"]
+    else:
+        qVio = overlap["slerpVioOrientations"]
 
     totalAngle = []
     gravityAngle = []
@@ -489,17 +500,18 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
         headingAngle.append(np.arccos(np.dot(xq, xg)))
 
     return {
-        "time": overlap["overlappingGtTimes"] - overlap["overlappingGtTimes"][0],
+        "time": overlap["overlappingGtTimes"],
         "dist": distGt,
         "total": totalAngle,
         "gravity": 180. / np.pi * np.array(gravityAngle),
         "heading": 180. / np.pi * np.array(headingAngle),
     }
 
+def rmseAngle(a):
+    return np.sqrt(np.mean(np.array(a)**2))
+
 def computeOrientationErrorMetric(vio, gt, full=False, alignType=None):
     if gt and len(gt.get("orientation", [])) > 0:
-        def rmseAngle(a):
-            return np.sqrt(np.mean(np.array(a)**2))
         orientationErrors = computeOrientationErrors(vio, gt, alignType)
         result = {
             "RMSE total": rmseAngle(orientationErrors["total"]),
@@ -510,6 +522,34 @@ def computeOrientationErrorMetric(vio, gt, full=False, alignType=None):
         return result
 
     return None
+
+def computePredictionError(vio, predictSeconds):
+    from scipy.spatial.transform import Rotation
+    newTimes = vio["position"][:, 0] + predictSeconds
+
+    newPos = vio["position"][:, 1:]  + vio["velocity"][:, 1:] * predictSeconds + 0.5 * vio["acceleration"][:, 1:] * (predictSeconds ** 2)
+    newPos = np.hstack((newTimes[:, np.newaxis], newPos))
+
+    newOri = []
+    for oriQ, angularV in zip(vio["orientation"][:, 1:], vio["angularVelocity"][:, 1:]):
+        deltaRotation = Rotation.from_rotvec(angularV * predictSeconds)
+        newOri.append((deltaRotation * Rotation.from_quat(oriQ)).as_quat())
+    newOri = np.hstack((newTimes[:, np.newaxis], np.array(newOri)))
+
+    newVio = {
+        "position": newPos,
+        "orientation": newOri
+    }
+    orientationErrors = computeOrientationErrors(newVio, vio, alignType=OrientationAlign.NONE)
+    return newVio, orientationErrors
+
+def computePredictionErrorMetrics(vio, predictSeconds):
+    (newVio, orientationErrors) = computePredictionError(vio, predictSeconds)
+    overlappingNewPos, overlappingVioPos = getOverlap(newVio["position"], vio["position"])
+    return {
+        "RMSE position (mm)": rmse(overlappingNewPos[:, 1:], overlappingVioPos[:, 1:]) * 1000,
+        "RMSE angle (°)": rmseAngle(orientationErrors["total"]),
+    }
 
 # Compute cumulative sum of distance traveled. Output length matches input length.
 def traveledDistance(positions):
@@ -580,6 +620,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True, alignType=OrientationAlign.TRAJECTORY)
         elif metricSet == Metric.ORIENTATION_ALIGNED:
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+        elif metricSet == Metric.PREDICTION:
+            metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
@@ -644,6 +686,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
     orientation = []
     velocity = []
     angularVelocity = []
+    acceleration = []
     bga = []
     baa = []
     bat = []
@@ -669,6 +712,9 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
             if isValidVector(row, "angularVelocity"):
                 av = row["angularVelocity"]
                 angularVelocity.append([t, av["x"], av["y"], av["z"]])
+            if isValidVector(row, "acceleration"):
+                av = row["acceleration"]
+                acceleration.append([t, av["x"], av["y"], av["z"]])
             stat.append(row.get("stationary", False))
             if "biasMean" in row:
                 bga.append(to_arr(row["biasMean"]["gyroscopeAdditive"]))
@@ -692,6 +738,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
         'orientation': np.array(orientation),
         'velocity': np.array(velocity),
         'angularVelocity': np.array(angularVelocity),
+        'acceleration': np.array(acceleration),
         'BGA': bias_norm(np.array(bga)) if bga else 0.0,
         'BAA': bias_norm(np.array(baa)) if baa else 0.0,
         'BAT': bias_norm(np.array(bat) - 1.0) if bat else 0.0,

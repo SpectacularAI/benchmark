@@ -5,9 +5,10 @@ import math
 import os
 
 from .compute_metrics import readDatasets, readVioOutput, align, Metric, metricSetToAlignmentParams, isSparse
-from .compute_metrics import computeVelocity, computeAlignedVelocity
-from .compute_metrics import computeAngularVelocity, computeAlignedAngularVelocity
+from .compute_metrics import computeVelocity, preComputeAlignedVelocity
+from .compute_metrics import computeAngularVelocity, preComputeAlignedAngularVelocity
 from .compute_metrics import computeOrientationErrors, OrientationAlign
+from .compute_metrics import computePredictionError, getOverlap, PREDICTION_SECONDS
 from .compute_metrics import PERCENTILES, percentileName
 
 import numpy as np
@@ -123,7 +124,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
 def plotVelocity(args, vio, tracks, axis, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        computeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
+        preComputeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
         vio["velocity"] = computeVelocity(vio, args.sampleIntervalForVelocity)
@@ -134,7 +135,7 @@ def plotVelocity(args, vio, tracks, axis, speed=False):
         if not t0:
             if d["position"].size == 0: continue
             t0 = d["position"][0, 0]
-        vs = d["velocity"]
+        vs = d["alignedVelocity"] if len(tracks) >= 1 else d["velocity"]
         if vs.size == 0: continue
         t = vs[:, 0]
         vs = vs[(t > t0) & (t < t0 + 10), :]
@@ -152,7 +153,7 @@ def plotVelocity(args, vio, tracks, axis, speed=False):
 def plotAngularVelocity(args, vio, tracks, axis, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        computeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
+        preComputeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
         vio["angularVelocity"] = computeAngularVelocity(vio, args.sampleIntervalForVelocity)
@@ -163,7 +164,7 @@ def plotAngularVelocity(args, vio, tracks, axis, speed=False):
         if not t0:
             if d["orientation"].size == 0: continue
             t0 = d["orientation"][0, 0]
-        avs = d["angularVelocity"]
+        avs = d["alignedAngularVelocity"] if len(tracks) >= 1 else d["angularVelocity"]
         if avs.size == 0: continue
         t = avs[:, 0]
         avs = avs[(t > t0) & (t < t0 + 10), :]
@@ -187,6 +188,17 @@ def plotOrientationErrors(args, vio, tracks, axis, full=False, alignType=Orienta
     if full:
         axis.plot(orientationErrors["time"], orientationErrors["gravity"], label="Gravity")
         axis.plot(orientationErrors["time"], orientationErrors["heading"], label="Heading")
+
+def plotPredictionError(args, vio, axis, predictSeconds):
+    (newVio, orientationErrors) = computePredictionError(vio, predictSeconds)
+    overlappingNewPos, overlappingVioPos, posTime = getOverlap(newVio["position"], vio["position"], includeTime=True)
+    positionError = np.linalg.norm(overlappingNewPos - overlappingVioPos, axis=1)
+
+    ax2 = axis.twinx()
+    axis.plot(posTime, positionError * 1000, color='teal')
+    ax2.plot(orientationErrors["time"], orientationErrors["total"], color='orange')
+    axis.set_ylabel('Position (mm)', color='teal', fontweight='bold')
+    ax2.set_ylabel('Orientation (°)', color='orange', fontweight='bold')
 
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
@@ -299,6 +311,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_ALIGNED.value:
                 plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+            elif metricSet == Metric.PREDICTION.value:
+                plotPredictionError(args, vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -315,7 +329,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
                 titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
             plotAxis.title.set_text(titleStr)
-            plotAxis.legend()
+
+            _, labels = plotAxis.get_legend_handles_labels()
+            if len(labels) > 0: plotAxis.legend()
 
         except Exception as e:
             if caseCount > 1:
@@ -373,6 +389,7 @@ def plotBenchmark(args, benchmarkFolder):
             if metricSet == Metric.ORIENTATION.value: continue
             if metricSet == Metric.ORIENTATION_FULL.value: continue
             if metricSet == Metric.ORIENTATION_ALIGNED.value: continue
+            if metricSet == Metric.PREDICTION.value: continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
 def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
