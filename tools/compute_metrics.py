@@ -342,10 +342,10 @@ def computeVelocity(data, intervalSeconds=None):
         p = data["position"]
     vs = []
     i = 0
-    for i in range(1, p.shape[0]):
-        dt = p[i, 0] - p[i - 1, 0]
+    for i in range(1, p.shape[0] - 1):
+        dt = p[i + 1, 0] - p[i - 1, 0]
         if dt <= 0: continue
-        dp = p[i, 1:] - p[i - 1, 1:]
+        dp = p[i + 1, 1:] - p[i - 1, 1:]
         if FILTER_SPIKES and np.linalg.norm(dp) > 0.1: continue
         v = dp / dt
         vs.append([p[i, 0], v[0], v[1], v[2]])
