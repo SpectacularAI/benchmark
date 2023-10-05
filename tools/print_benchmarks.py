@@ -22,6 +22,13 @@ def add(data, metricName, caseName, metric):
     data[metricName].append((caseName, metric))
 
 def main(args):
+    infoFile = f"{args.resultsDir}/info.json"
+    if not pathlib.Path(infoFile).exists():
+        print(f"Couldn't fined info file to print from {infoFile}")
+    else:
+        with open(infoFile, 'r') as file:
+            print(file.read())
+
     metricsDir = "{}/metrics".format(args.resultsDir)
     if not pathlib.Path(metricsDir).exists():
         print("No metrics/ folder.")
