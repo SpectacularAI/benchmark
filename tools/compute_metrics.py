@@ -474,7 +474,10 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
     distGt = traveledDistance(gt["position"][gtStartInd:gtEndInd, 1:])
 
     if alignType == OrientationAlign.TRAJECTORY:
-        (_, _, R) = align(vio["position"], gt["position"], align3d=True, fix_scale=True, return_rotation_matrix=True)
+        (_, rad) = align(vio["position"], gt["position"], rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False)
+        R = [[math.cos(rad), -math.sin(rad), 0],
+            [math.sin(rad),  math.cos(rad),  0],
+            [0,              0,              1]]
         qVio = Rotation.from_matrix(R) * overlap["slerpVioOrientations"]
     elif alignType == OrientationAlign.AVERAGE_ORIENTATION:
         qVio = overlap["avgRotation"] * overlap["slerpVioOrientations"]
@@ -484,20 +487,17 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
     totalAngle = []
     gravityAngle = []
     headingAngle = []
-    GRAVITY_DIRECTION = np.array([0, 0, -1]) # TODO: This doesn't make much sense with align3d
+    GRAVITY_DIRECTION = np.array([0, 0, -1])
     for i in range(len(qVio)):
-        q = qVio[i].as_matrix()
-        g = qGt[i].as_matrix()
-        Q = g.transpose() @ q
-        totalAngle.append(np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)))
+        q_ours = qVio[i].as_matrix()
+        q_gt = qGt[i].as_matrix()
+
+        totalAngle.append(np.linalg.norm((qVio[i].inv() * qGt[i]).as_rotvec(degrees=True)))
 
         # Project global gravity direction to local coordinates and compare.
-        gravityAngle.append(np.arccos(np.dot(q.transpose() @ GRAVITY_DIRECTION, g.transpose() @ GRAVITY_DIRECTION)))
+        gravityAngle.append(np.arccos(np.dot(q_ours.transpose() @ GRAVITY_DIRECTION, q_gt.transpose() @ GRAVITY_DIRECTION)))
 
-        # Project local X axis to world XY plane and compare.
-        xq = q[:2, 0] / np.linalg.norm(q[:2, 0])
-        xg = g[:2, 0] / np.linalg.norm(g[:2, 0])
-        headingAngle.append(np.arccos(np.dot(xq, xg)))
+        headingAngle.append(abs(2 * math.asin((qVio[i] * qGt[i].inv()).as_quat()[2]))) # quat[2] == .z
 
     return {
         "time": overlap["overlappingGtTimes"],
