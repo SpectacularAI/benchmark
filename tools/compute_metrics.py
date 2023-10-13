@@ -9,9 +9,9 @@ from enum import Enum
 
 import numpy as np
 
-# Track types accurate enough to be used as ground-truth. In lowercase.
+# Track types to be used as ground-truth. In lowercase.
 # Instead of adding entries to this list, consider converting your dataset to have "groundTruth" rows.
-GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose"]
+GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Scaling to get numbers closer to 1 that are easier for humans to compare.
 PIECEWISE_METRIC_SCALE = 100.0
