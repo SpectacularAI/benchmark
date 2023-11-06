@@ -30,6 +30,11 @@ PERCENTILES = [95, 100]
 PREDICTION_SECONDS = 0.03
 
 class Metric(Enum):
+    # Track position error metrics:
+    #
+    # Do not align tracks in any way. Useful when VIO is is supplied with inputs that
+    # allow it to track wrt a known coordinate system.
+    NO_ALIGN = "no_align"
     # For non-piecewise alignment, this is the "proper" metric for VIO methods that
     # rotates the track only around the z-axis since the VIO is supposed to be able
     # to estimate direction of gravity (z-axis). The piecewise alignment methods are
@@ -43,6 +48,7 @@ class Metric(Enum):
     PIECEWISE = "piecewise"
     # Like `PIECEWISE`, but does not penalize drift in z direction.
     PIECEWISE_NO_Z = "piecewise_no_z"
+
     # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
     COVERAGE = "coverage"
     # RMSE of aligned angular velocities. May be computed from orientations if not available in the data.
@@ -71,6 +77,8 @@ def metricSetToAlignmentParams(metricSet):
         Metric.PIECEWISE_NO_Z
     ]:
         return {} # The defaults are correct.
+    elif metricSet == Metric.NO_ALIGN:
+        return dict(alignEnabled=False)
     elif metricSet == Metric.FULL_3D:
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
@@ -106,14 +114,15 @@ def getOverlap(out, gt, includeTime=False):
     if includeTime: return out_part[:, 1:], gt_part[:, 1:], out_part[:, 0]
     else: return out_part[:, 1:], gt_part[:, 1:]
 
-def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True, origin_zero=False, return_rotation_matrix=False):
+def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True,
+        origin_zero=False, return_rotation_matrix=False, alignEnabled=True):
     """
     Align `out` to `gt` by rotating so that angle(gt[t]) = angle(out[t]), relative to the
     origin at some timestamp t, which is, determined as e.g, 1/3 of the
     session length. Negative value means the alignment is done using the whole segment.
     """
     out_rotation = None
-    if len(out) <= 0 or len(gt) <= 0: return out, out_rotation
+    if not alignEnabled or len(out) <= 0 or len(gt) <= 0: return out, out_rotation
 
     out_part, gt_part = getOverlap(out, gt)
     if out_part.shape[0] <= 0: return out, out_rotation
@@ -582,7 +591,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             }
             if None in m.values(): m = None
             metrics[metricSetStr] = m
-        elif metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+        elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
             alignedVio, unalignedGt = getOverlap(alignedVio, pGt)
@@ -777,7 +786,7 @@ def computeSummaryValue(metricsJson):
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
         return np.mean(list(metricsJson[metricSet.value].values()))
-    for metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
         return metricsJson[metricSet.value]["RMSE"]
@@ -802,7 +811,7 @@ def computeRelativeMetrics(metrics, baseline):
             a = np.mean(list(metrics[metricSetStr].values()))
             b = np.mean(list(baseline[metricSetStr].values()))
             setRelativeMetric(relative, metricSetStr, a, b)
-    for metricSet in [Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
             a = metrics[metricSetStr]["RMSE"]
