@@ -51,7 +51,7 @@ def vioTrackingFn(args, benchmark, outputDir, outputFile, prefixCmd):
 
 if __name__ == "__main__":
     args = getArgParser().parse_args()
-    args.methodName = "Spectacular AI"
+    if args.methodName == "VIO": args.methodName = "Spectacular AI"
     success = benchmark(args, vioTrackingFn, setupFn, tearDownFn)
     if not success:
         sys.exit(1)
