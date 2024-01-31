@@ -48,7 +48,7 @@ def getArgParser():
     parser.add_argument("-setDir", help="An additional directory to search for benchmark set", default="../sets")
     parser.add_argument("-recordingDir", help="Path to a single benchmark recording to run. Ignores `-rootDataDir`")
     parser.add_argument("-params", help="Parameters as a string, eg '-params \"-useStereo=false -v=1\"'")
-    parser.add_argument("-threads", help="How many CPU threads to use for running benchmarks", default=6)
+    parser.add_argument("-threads", help="How many CPU threads to use for running benchmarks", type=int, default=6)
     parser.add_argument("-runId", help="Output folder name. If unset will use timestamp")
     parser.add_argument("-skipBenchmark", help="Skips running benchmark and only aggregates existing ones. For development use.", action="store_true")
     parser.add_argument("-offsetTracks", help="When enabled, tracks are stacked instead of overlaid", action="store_true")
