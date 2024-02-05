@@ -48,6 +48,8 @@ class Metric(Enum):
     PIECEWISE = "piecewise"
     # Like `PIECEWISE`, but does not penalize drift in z direction.
     PIECEWISE_NO_Z = "piecewise_no_z"
+    # Similar to `PIECEWISE`, but builds the segments from the VIO pose trail outputs.
+    POSE_TRAIL = "pose_trail"
 
     # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
     COVERAGE = "coverage"
@@ -74,7 +76,8 @@ def metricSetToAlignmentParams(metricSet):
         Metric.POSTPROCESSED,
         Metric.COVERAGE,
         Metric.PIECEWISE,
-        Metric.PIECEWISE_NO_Z
+        Metric.PIECEWISE_NO_Z,
+        Metric.POSE_TRAIL,
     ]:
         return {} # The defaults are correct.
     elif metricSet == Metric.NO_ALIGN:
@@ -591,6 +594,13 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             }
             if None in m.values(): m = None
             metrics[metricSetStr] = m
+        elif metricSet == Metric.POSE_TRAIL:
+            metrics[metricSetStr] = {
+                # TODO pVio does not contain the pose trail
+                "1s": computePoseTrailMetric(pVio, pGt, 1.0),
+                "3s": computePoseTrailMetric(pVio, pGt, 3.0),
+                "10s": computePoseTrailMetric(pVio, pGt, 10.0),
+            }
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
@@ -782,6 +792,8 @@ def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
 # for the available metrics. If the most prefered metric computation has failed, output `None`
 # rather than falling back to another metric (as that would mess up averages across multiple cases).
 def computeSummaryValue(metricsJson):
+    if Metric.POSE_TRAIL in metricsJson:
+        return metricsJson[Metric.POSE_TRAIL]["3s"] # In case the pose trail is sometimes/always shorter than 10s.
     for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
@@ -805,6 +817,10 @@ def computeRelativeMetrics(metrics, baseline):
         return kind in m and m[kind]
 
     relative = {}
+    if hasResults(Metric.POSE_TRAIL.value, metrics) and hasResults(Metric.POSE_TRAIL.value, baseline):
+        a = metrics[Metric.POSE_TRAIL]["3s"]
+        b = metrics[Metric.POSE_TRAIL]["3s"]
+        setRelativeMetric(relative, Metric.POSE_TRAIL.value, a, b)
     for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
