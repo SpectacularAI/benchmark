@@ -871,7 +871,6 @@ if __name__ == "__main__":
     parser.add_argument("benchmarkFolder")
     parser.add_argument("caseName")
     parser.add_argument('--baseline', default=None)
-    parser.add_argument('--baseline', default=None)
     parser.add_argument("--sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
     args = parser.parse_args()
 

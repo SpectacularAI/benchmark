@@ -8,6 +8,23 @@ import json
 
 from tools.benchmark import benchmark, getArgParser
 
+def writeOutputWithPoseTrail(f, output):
+    obj = json.loads(output.asJson())
+    obj["poseTrail"] = []
+    for pose in output.poseTrail:
+        obj["poseTrail"].append({
+            "position": { "x": pose.position.x, "y": pose.position.y, "z": pose.position.z },
+            "orientation": {
+                "x": pose.orientation.x,
+                "y": pose.orientation.y,
+                "z": pose.orientation.z,
+                "w": pose.orientation.w,
+            },
+            "time": pose.time,
+        })
+    f.write(json.dumps(obj, separators=(', ', ': ')))
+    f.write("\n")
+
 def setupFn(args, outputDir):
     pass
 
@@ -34,7 +51,8 @@ def vioTrackingFn(args, benchmark, outputDir, outputFile, prefixCmd):
     else:
         def onOutput(output):
             with open(outputFile, "a") as f:
-                f.write(output.asJson() + "\n")
+                if args.savePoseTrail: writeOutputWithPoseTrail(f, output)
+                else: f.write(output.asJson() + "\n")
 
         import spectacularAI
         replay = spectacularAI.Replay(benchmark.dir)
@@ -52,6 +70,7 @@ def vioTrackingFn(args, benchmark, outputDir, outputFile, prefixCmd):
 if __name__ == "__main__":
     args = getArgParser().parse_args()
     if args.methodName == "VIO": args.methodName = "Spectacular AI"
+
     success = benchmark(args, vioTrackingFn, setupFn, tearDownFn)
     if not success:
         sys.exit(1)
