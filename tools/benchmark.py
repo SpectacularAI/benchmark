@@ -176,6 +176,7 @@ def convertComparisonData(casePaths, metricSets):
     needsOrientation = (Metric.VELOCITY.value in metricSets
         or Metric.ANGULAR_VELOCITY.value in metricSets
         or Metric.ORIENTATION.value in metricSets
+        or Metric.POSE_TRAIL_3D.value in metricSets
         or Metric.ORIENTATION_FULL.value in metricSets
         or Metric.ORIENTATION_ALIGNED.value in metricSets)
     if needsOrientation:
@@ -495,7 +496,8 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         raise Exception("-skipBenchmark requires -runId.")
 
     metricSets = args.metricSet.split(",")
-    if "pose_trail" in metricSets: args.savePoseTrail = True
+    if "pose_trail" in metricSets or "pose_trail_3d" in metricSets:
+        args.savePoseTrail = True
 
     def withMkdir(dir):
         pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
