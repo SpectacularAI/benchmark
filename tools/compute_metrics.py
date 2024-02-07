@@ -380,9 +380,6 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
 
         assert(poseTrail[poseInd0, 0] <= t0)
         t0 = poseTrail[poseInd1, 0]
-        # tVio1 = poseTrail[poseInd1, 0]
-        # print("pose [{}, {}] len {}, target len {}".format(
-        #     tVio0, tVio1, tVio1 - tVio0, pieceLenSecs))
         yield {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
@@ -398,7 +395,6 @@ def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
     err = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
         err.append(np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3]))
-        # print("len", segment["pieceLenSecs"])
 
     return np.sqrt(np.mean(np.array(err) ** 2))
 
@@ -690,7 +686,6 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
                 "3s": computePoseTrailMetric(vio["poseTrails"], gt, 3.0),
                 "10s": computePoseTrailMetric(vio["poseTrails"], gt, 10.0),
             }
-            print(metrics[metricSetStr]) # TODO
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
@@ -767,7 +762,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
     # Caching is not that beneficial here.
     global VIO_OUTPUT_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
-    key = "{}+{}+{}".format(baseName, caseName, postprocessed)
+    key = "{}+{}+{}+{}".format(baseName, caseName, postprocessed, getPoseTrails)
     if key in VIO_OUTPUT_CACHE: return VIO_OUTPUT_CACHE[key].copy()
 
     if postprocessed:
