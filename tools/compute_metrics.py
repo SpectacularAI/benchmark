@@ -387,6 +387,7 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
 
         assert(poseTrail[poseInd0, 0] <= t0)
         t0 = poseTrail[poseInd1, 0]
+        # print("target len {}, got {}".format(pieceLenSecs, tVio1 - tVio0))
         yield {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
@@ -690,8 +691,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
         elif metricSet == Metric.POSE_TRAIL_3D:
             metrics[metricSetStr] = {
                 "1s": computePoseTrailMetric(vio["poseTrails"], gt, 1.0),
-                "3s": computePoseTrailMetric(vio["poseTrails"], gt, 3.0),
-                "10s": computePoseTrailMetric(vio["poseTrails"], gt, 10.0),
+                "2s": computePoseTrailMetric(vio["poseTrails"], gt, 2.0),
+                "4s": computePoseTrailMetric(vio["poseTrails"], gt, 4.0),
             }
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
