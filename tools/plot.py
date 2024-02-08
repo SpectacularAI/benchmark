@@ -3,12 +3,14 @@
 import json
 import math
 import os
+import pathlib
 
 from .compute_metrics import readDatasets, readVioOutput, align, Metric, metricSetToAlignmentParams, isSparse
 from .compute_metrics import computeVelocity, preComputeAlignedVelocity
 from .compute_metrics import computeAngularVelocity, preComputeAlignedAngularVelocity
 from .compute_metrics import computeOrientationErrors, OrientationAlign
 from .compute_metrics import computePredictionError, getOverlap, PREDICTION_SECONDS
+from .compute_metrics import generatePoseTrailMetricSegments
 from .compute_metrics import PERCENTILES, percentileName
 
 import numpy as np
@@ -200,6 +202,33 @@ def plotPredictionError(args, vio, axis, predictSeconds):
     axis.set_ylabel('Position (mm)', color='teal', fontweight='bold')
     ax2.set_ylabel('Orientation (°)', color='orange', fontweight='bold')
 
+def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
+    if len(tracks) == 0:
+        print("Expected ground truth track")
+        return
+    gt = tracks[0]
+
+    axis.axis('equal')
+    axis.plot(gt["position"][:, ax1], gt["position"][:, ax2], label=gt["name"],
+        color=getColor(gt["name"]), linewidth=1)
+
+    if not "poseTrails" in vio:
+        print("Expected pose trail data")
+        return
+    if not "orientation" in gt:
+        print("Expected orientation in ground truth")
+        return
+
+    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio["poseTrails"], 3.0, gt)):
+        x = []
+        y = []
+        for vioToGtWorld in segment["vioToGtWorlds"]:
+            # No time index, subtract one.
+            x.append(vioToGtWorld[ax1 - 1, 3])
+            y.append(vioToGtWorld[ax2 - 1, 3])
+        label = vio["name"] if segmentInd == 0 else None
+        axis.plot(x, y, label=label, color=getColor(vio["name"]), linewidth=1)
+
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
@@ -265,6 +294,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     figure, subplots = plt.subplots(rows, columns, figsize=figureSize(caseCount))
     subplots = np.ravel(subplots)
 
+    getPoseTrails = metricSet == Metric.POSE_TRAIL_3D.value
+
     for i, caseName in enumerate(caseNames):
         try:
             titleStr = caseName
@@ -288,7 +319,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
             tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
             postprocessed = metricSet == Metric.POSTPROCESSED.value
-            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed)
+            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed, getPoseTrails)
 
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
@@ -313,6 +344,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
             elif metricSet == Metric.PREDICTION.value:
                 plotPredictionError(args, vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
+            elif metricSet == Metric.POSE_TRAIL_3D.value:
+                plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -364,6 +397,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     plt.close(figure)
 
 def plotBenchmark(args, benchmarkFolder):
+    if not pathlib.Path(benchmarkFolder).exists():
+        raise Exception(f"No such folder: `{benchmarkFolder}`")
+
     if not args.caseName:
         caseNames = []
         for x in os.walk("{}/info".format(benchmarkFolder)):
@@ -402,6 +438,10 @@ def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocit
     varsPlotArgs["showPlot"] = False
     varsPlotArgs["excludePlots"] = excludePlots.split(",")
     varsPlotArgs["sampleIntervalForVelocity"] = sampleIntervalForVelocity
+
+    if not pathlib.Path(results).exists():
+        raise Exception(f"No such folder: `{results}`")
+
     for x in os.walk(results + "/info"):
         for caseInfoJsonPath in x[2]:
             benchmarkInfo = json.loads(open(os.path.join(results, "info", caseInfoJsonPath)).read())

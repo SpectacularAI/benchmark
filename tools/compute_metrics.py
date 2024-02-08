@@ -48,6 +48,10 @@ class Metric(Enum):
     PIECEWISE = "piecewise"
     # Like `PIECEWISE`, but does not penalize drift in z direction.
     PIECEWISE_NO_Z = "piecewise_no_z"
+    # Similar to `PIECEWISE`, but builds the segments from the VIO pose trail outputs.
+    POSE_TRAIL_3D = "pose_trail_3d"
+    # Not implemented, but this would be like POSE_TRAIL_3D where the orientation is aligned only around gravity.
+    # POSE_TRAIL = "pose_trail"
 
     # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
     COVERAGE = "coverage"
@@ -74,7 +78,8 @@ def metricSetToAlignmentParams(metricSet):
         Metric.POSTPROCESSED,
         Metric.COVERAGE,
         Metric.PIECEWISE,
-        Metric.PIECEWISE_NO_Z
+        Metric.PIECEWISE_NO_Z,
+        Metric.POSE_TRAIL_3D,
     ]:
         return {} # The defaults are correct.
     elif metricSet == Metric.NO_ALIGN:
@@ -308,6 +313,90 @@ def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     # In random walk noise, the standard deviance is proportional to elapsed time.
     normalizedRmse = PIECEWISE_METRIC_SCALE * rmse(gt, interpolated) / np.sqrt(pieceLenSecs)
     return normalizedRmse
+
+# Generate slightly overlapping pose trail segments of length `pieceLenSecs`, over the timespan of `gt`.
+# The segments are cut from the current end of the pose trail. The segment is aligned by matching
+# the pose of the older end to the `gt` pose at the same timestamp (interpolated).
+def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
+    from scipy.spatial.transform import Rotation, Slerp
+
+    qGt = Rotation.from_quat(gt["orientation"][:, 1:])
+    slerp = Slerp(gt["orientation"][:, 0], qGt)
+    def interpolateGtPose(tVio):
+        rotationGt = slerp([tVio])
+        pGt = np.hstack([np.interp(tVio, gt["position"][:, 0], gt["position"][:, i]) for i in range(1, 4)])
+        gtToWorld = np.identity(4)
+        gtToWorld[:3, 3] = pGt
+        gtToWorld[:3, :3] = rotationGt.as_matrix()
+        return gtToWorld
+
+    t0 = gt["position"][0, 0]
+    for poseTrailInd, poseTrail in enumerate(poseTrails):
+        assert(poseTrail.size > 0)
+
+        # Skip pose trails in the beginning.
+        if poseTrail[0, 0] < t0 and poseTrail[-1, 0] - t0 < pieceLenSecs: continue
+        poseCount = poseTrail.shape[0]
+        # poseInd0 is somewhere in the middle of the trail and poseInd1 is the current pose.
+        poseInd0 = None
+        poseInd1 = poseCount - 1
+        for i in reversed(range(poseCount)):
+            if poseTrail[i, 0] < gt["position"][0, 0]: break
+            if poseTrail[i, 0] <= t0:
+                poseInd0 = i
+                break
+        if poseInd0 is None:
+            # The whole pose trail was shorter than `pieceLenSecs`, skip a part in the ground
+            # truth by setting `t0` so that it will work with the next pose trail.
+            # Could compute some kind of accompanying "coverage" metric.
+            if poseTrailInd + 1 < len(poseTrails):
+                t0 = poseTrails[poseTrailInd + 1][0, 0]
+            continue
+
+        tVio0 = poseTrail[poseInd0, 0]
+        tVio1 = poseTrail[poseInd1, 0]
+        if tVio1 > gt["position"][-1, 0]: break
+        gtToWorld0 = interpolateGtPose(tVio0)
+        gtToWorld1 = interpolateGtPose(tVio1)
+
+        vioToWorld0 = np.identity(4)
+        vioToWorld0[:3, 3] = poseTrail[poseInd0, 1:4]
+        vioToWorld0[:3, :3] = Rotation.from_quat(poseTrail[poseInd0, 4:8]).as_matrix()
+
+        # Compute and apply world transformation at poseInd0 that takes VIO poses to ground truth world.
+        vioWorldToGtWorld = gtToWorld0 @ np.linalg.inv(vioToWorld0)
+        vioToGtWorlds = []
+        vioTimes = []
+        for i in range(poseInd0, poseCount):
+            vioTimes.append(poseTrail[i, 0])
+            vioToWorld = np.identity(4)
+            vioToWorld[:3, 3] = poseTrail[i, 1:4]
+            vioToWorld[:3, :3] = Rotation.from_quat(poseTrail[i, 4:8]).as_matrix()
+            vioToGtWorlds.append(vioWorldToGtWorld @ vioToWorld)
+        # The first pose matches up to floating point accuracy:
+        #   assert(vioToGtWorlds[0] == gtToWorld0)
+        # VIO accuracy is measured by comparing the poses at tVio1:
+        #   metric(vioToGtWorlds[-1], gtToWorld1)
+
+        assert(poseTrail[poseInd0, 0] <= t0)
+        t0 = poseTrail[poseInd1, 0]
+        yield {
+            "vioTimes": vioTimes,
+            "vioToGtWorlds": vioToGtWorlds,
+            "lastGtToWorld": gtToWorld1,
+            "pieceLenSecs": tVio1 - tVio0,
+        }
+
+def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
+    """RMSE of VIO position drift when comparing pose trail segments to ground truth"""
+    if len(vioPoseTrails) == 0: return None
+    if gt["position"].size == 0 or gt["orientation"].size == 0: return None
+
+    err = []
+    for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
+        err.append(np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3]))
+
+    return np.sqrt(np.mean(np.array(err) ** 2))
 
 # Align 3-vectors such as velocity and angular velocity using rotation that matches the position tracks.
 def alignWithTrackRotation(vioData, vioPosition, gtPosition):
@@ -591,6 +680,12 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             }
             if None in m.values(): m = None
             metrics[metricSetStr] = m
+        elif metricSet == Metric.POSE_TRAIL_3D:
+            metrics[metricSetStr] = {
+                "1s": computePoseTrailMetric(vio["poseTrails"], gt, 1.0),
+                "3s": computePoseTrailMetric(vio["poseTrails"], gt, 3.0),
+                "10s": computePoseTrailMetric(vio["poseTrails"], gt, 10.0),
+            }
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
@@ -663,11 +758,11 @@ def readDatasetsJson(fn, include=[], exclude=[]):
 
 VIO_OUTPUT_CACHE = {}
 
-def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
+def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseTrails=False):
     # Caching is not that beneficial here.
     global VIO_OUTPUT_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
-    key = "{}+{}+{}".format(baseName, caseName, postprocessed)
+    key = "{}+{}+{}+{}".format(baseName, caseName, postprocessed, getPoseTrails)
     if key in VIO_OUTPUT_CACHE: return VIO_OUTPUT_CACHE[key].copy()
 
     if postprocessed:
@@ -691,6 +786,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
 
     bias_norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     to_arr = lambda obj: [obj["x"], obj["y"], obj["z"]]
+
     position = []
     orientation = []
     velocity = []
@@ -703,6 +799,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
     idToTime = {}
     loopClosures = []
     resets = []
+    poseTrails = []
     with open(outputPath) as f:
         for line in f.readlines():
             row = json.loads(line)
@@ -741,6 +838,16 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
                     loopClosures.append((t, idToTime[loopClosureId], loopClosureLinkColor))
             if "status" in row:
                 if row["status"] == "LOST_TRACKING": resets.append(t)
+            # May be slow, get only of needed.
+            if "poseTrail" in row and getPoseTrails:
+                poseTrail = []
+                # Reverse so that smallest timestamp comes first.
+                for pose in reversed(row["poseTrail"]):
+                    p = pose["position"]
+                    q = pose["orientation"]
+                    poseTrail.append([pose["time"], p["x"], p["y"], p["z"], q["x"], q["y"], q["z"], q["w"]])
+                if len(poseTrail) == 0: continue # Simplifies algorithms.
+                poseTrails.append(np.array(poseTrail))
 
     VIO_OUTPUT_CACHE[key] = {
         'position': np.array(position),
@@ -754,6 +861,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False):
         'stationary': np.array(stat),
         'loopClosures': loopClosures,
         'resets': resets,
+        'poseTrails': poseTrails,
     }
     return VIO_OUTPUT_CACHE[key].copy()
 
@@ -782,6 +890,8 @@ def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
 # for the available metrics. If the most prefered metric computation has failed, output `None`
 # rather than falling back to another metric (as that would mess up averages across multiple cases).
 def computeSummaryValue(metricsJson):
+    if Metric.POSE_TRAIL_3D in metricsJson:
+        return metricsJson[Metric.POSE_TRAIL_3D]["3s"] # In case the pose trail is sometimes/always shorter than 10s.
     for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
@@ -805,6 +915,10 @@ def computeRelativeMetrics(metrics, baseline):
         return kind in m and m[kind]
 
     relative = {}
+    if hasResults(Metric.POSE_TRAIL_3D.value, metrics) and hasResults(Metric.POSE_TRAIL_3D.value, baseline):
+        a = metrics[Metric.POSE_TRAIL_3D]["3s"]
+        b = metrics[Metric.POSE_TRAIL_3D]["3s"]
+        setRelativeMetric(relative, Metric.POSE_TRAIL_3D.value, a, b)
     for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
@@ -833,8 +947,8 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
     datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
     gt = datasets[0] if datasets else None
 
-    vio = readVioOutput(benchmarkFolder, caseName, info, False)
-    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, True)
+    vio = readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseTrails=True)
+    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, postprocessed=True, getPoseTrails=True)
 
     if gt:
         metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity)
@@ -854,7 +968,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("benchmarkFolder")
     parser.add_argument("caseName")
-    parser.add_argument('--baseline', default=None)
     parser.add_argument('--baseline', default=None)
     parser.add_argument("--sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
     args = parser.parse_args()

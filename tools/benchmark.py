@@ -62,6 +62,7 @@ def getArgParser():
     parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
+    parser.add_argument("-savePoseTrail", action="store_true") # Set automatically.
     return parser
 
 
@@ -175,6 +176,7 @@ def convertComparisonData(casePaths, metricSets):
     needsOrientation = (Metric.VELOCITY.value in metricSets
         or Metric.ANGULAR_VELOCITY.value in metricSets
         or Metric.ORIENTATION.value in metricSets
+        or Metric.POSE_TRAIL_3D.value in metricSets
         or Metric.ORIENTATION_FULL.value in metricSets
         or Metric.ORIENTATION_ALIGNED.value in metricSets)
     if needsOrientation:
@@ -493,6 +495,10 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     if args.skipBenchmark and not args.runId:
         raise Exception("-skipBenchmark requires -runId.")
 
+    metricSets = args.metricSet.split(",")
+    if "pose_trail" in metricSets or "pose_trail_3d" in metricSets:
+        args.savePoseTrail = True
+
     def withMkdir(dir):
         pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
         return dir
@@ -580,7 +586,6 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     print("… took {:.0f}s.".format(time.time() - startTime))
 
     # Copy the aggregate figure of each metric to a shared folder for easier comparison.
-    metricSets = args.metricSet.split(",")
     for metricSet in metricSets:
         src = getFigurePath("{}/figures".format(results), metricSet)
         if not os.path.exists(src): continue
