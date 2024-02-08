@@ -335,7 +335,14 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
         assert(poseTrail.size > 0)
 
         # Skip pose trails in the beginning.
-        if poseTrail[0, 0] < t0 and poseTrail[-1, 0] - t0 < pieceLenSecs: continue
+        if poseTrail[-1, 0] < t0: continue
+
+        # If next pose trail is good one, skip this.
+        if poseTrailInd + 1 < len(poseTrails):
+            nt0 = poseTrails[poseTrailInd + 1][0, 0]
+            nt1 = poseTrails[poseTrailInd + 1][-1, 0]
+            if nt0 < t0 and nt1 - pieceLenSecs < t0: continue
+
         poseCount = poseTrail.shape[0]
         # poseInd0 is somewhere in the middle of the trail and poseInd1 is the current pose.
         poseInd0 = None
