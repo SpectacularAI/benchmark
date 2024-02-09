@@ -400,11 +400,21 @@ def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
     if len(vioPoseTrails) == 0: return None
     if gt["position"].size == 0 or gt["orientation"].size == 0: return None
 
+    from scipy.spatial.transform import Rotation
     err = []
+    segments = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
-        err.append(np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3]))
+        d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        Q = segment["vioToGtWorlds"][-1][:3, :3].transpose() @ segment["lastGtToWorld"][:3, :3]
+        err.append(d)
+        segments.append({
+            "positionErrorMeters": d,
+            "orientationErrorDegrees": np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)),
+            "pieceLengthSeconds": segment["pieceLenSecs"],
+        })
 
-    return np.sqrt(np.mean(np.array(err) ** 2))
+    rmse = np.sqrt(np.mean(np.array(err) ** 2))
+    return rmse, segments
 
 # Align 3-vectors such as velocity and angular velocity using rotation that matches the position tracks.
 def alignWithTrackRotation(vioData, vioPosition, gtPosition):
@@ -689,11 +699,9 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             if None in m.values(): m = None
             metrics[metricSetStr] = m
         elif metricSet == Metric.POSE_TRAIL_3D:
-            metrics[metricSetStr] = {
-                "1s": computePoseTrailMetric(vio["poseTrails"], gt, 1.0),
-                "2s": computePoseTrailMetric(vio["poseTrails"], gt, 2.0),
-                "4s": computePoseTrailMetric(vio["poseTrails"], gt, 4.0),
-            }
+            metrics[metricSetStr] = {}
+            for l in [1, 2, 4]:
+                metrics[metricSetStr][f"{l}s"], metrics[metricSetStr][f"{l}s-segments"] = computePoseTrailMetric(vio["poseTrails"], gt, l)
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))

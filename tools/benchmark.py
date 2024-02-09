@@ -559,13 +559,24 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     endTime = datetime.now().strftime(DATE_FORMAT)
 
+    # Copy data from case metrics JSON files to `metrics.json` in the result root.
     metrics = {}
     for x in os.walk(results + "/metrics"):
         for caseMetricsJsonPath in x[2]:
             benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
             caseName = caseMetricsJsonPath.rpartition(".")[0]
             assert(not caseName in metrics)
-            metrics[caseName] = benchmarkMetrics
+            metrics[caseName] = {}
+            for k, v in benchmarkMetrics.items():
+                metrics[caseName][k] = v
+                # These have too much text and we don't want to aggregrate metrics for them here.
+                if "pose_trail" in k:
+                    delete = []
+                    for pk, pv in metrics[caseName][k].items():
+                        if "segments" in pk: delete.append(pk)
+                    for d in delete:
+                        del metrics[caseName][k][d]
+
     ametrics = aggregateMetrics(list(metrics.values()))
 
     # Delete the relative numbers so it's easier to copy-paste entries from this file
