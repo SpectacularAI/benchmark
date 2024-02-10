@@ -63,6 +63,7 @@ def getArgParser():
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
     parser.add_argument("-savePoseTrail", action="store_true") # Set automatically.
+    parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
     return parser
 
 
@@ -71,12 +72,24 @@ class Benchmark:
     params = None
     name = None
     paramSet = None
+    iteration = None
 
-    def __init__(self, dir, name=None, params=None, paramSet=None):
+    def __init__(self, dir, name=None, params=None, paramSet=None, iteration=None):
         self.dir = dir
         self.name = name
         self.params = params
         self.paramSet = paramSet
+        self.iteration = iteration
+
+    def clone(self, iteration):
+        return Benchmark(
+            dir=self.dir,
+            name=f"{self.name}_{iteration}",
+            params=self.params,
+            paramSet=self.paramSet,
+            iteration=iteration
+        )
+
 
 def computeVideoTimeSpan(dataJsonlPath):
     if not os.path.exists(dataJsonlPath): return None
@@ -337,6 +350,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
+        if benchmark.iteration: infoJson["iteration"] = benchmark.iteration
         infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': ')))
 
     baseline = None
@@ -535,6 +549,13 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         else:
             print("You must select benchmark data using either `-set`, `-dataDir` or `-recordingDir`.")
             return
+
+        if args.iterations > 1:
+            benchmarksIterated = []
+            for b in benchmarks:
+                for i in range(1, args.iterations + 1):
+                    benchmarksIterated.append(b.clone(i))
+            benchmarks = benchmarksIterated
 
         if len(benchmarks) == 0:
             print("No matching benchmarks found! Exiting")
