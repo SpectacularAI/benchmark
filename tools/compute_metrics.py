@@ -405,13 +405,18 @@ def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
     segments = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        # First vioToGtWorld is the same as first gt-to-world because of the alignment.
+        gtDistance = np.linalg.norm(segment["vioToGtWorlds"][0][:3, 3] - segment["lastGtToWorld"][:3, 3])
         Q = segment["vioToGtWorlds"][-1][:3, :3].transpose() @ segment["lastGtToWorld"][:3, :3]
-        err.append(d)
+        t = segment["pieceLenSecs"]
+        speed = gtDistance / t if t > 0 else None
         segments.append({
             "positionErrorMeters": d,
             "orientationErrorDegrees": np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)),
-            "pieceLengthSeconds": segment["pieceLenSecs"],
+            "pieceLengthSeconds": t,
+            "speed": speed,
         })
+        err.append(d)
 
     rmse = np.sqrt(np.mean(np.array(err) ** 2))
     return rmse, segments
