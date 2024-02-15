@@ -62,6 +62,7 @@ def getArgParser():
     parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
+    parser.add_argument("-poseTrailLengths", type=str, default="1,2,4", help="Pose trail metrics target segment lengths, in seconds, separated by comma.")
     parser.add_argument("-savePoseTrail", action="store_true") # Set automatically.
     parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
     return parser
@@ -348,6 +349,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "metricSets": metricSets,
             "fixOrigin": args.fixOrigin,
             "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
+            "poseTrailLengths": [float(s) for s in args.poseTrailLengths.split(",")],
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
         if benchmark.iteration: infoJson["iteration"] = benchmark.iteration
@@ -580,13 +582,24 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     endTime = datetime.now().strftime(DATE_FORMAT)
 
+    # Copy data from case metrics JSON files to `metrics.json` in the result root.
     metrics = {}
     for x in os.walk(results + "/metrics"):
         for caseMetricsJsonPath in x[2]:
             benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
             caseName = caseMetricsJsonPath.rpartition(".")[0]
             assert(not caseName in metrics)
-            metrics[caseName] = benchmarkMetrics
+            metrics[caseName] = {}
+            for k, v in benchmarkMetrics.items():
+                metrics[caseName][k] = v
+                # These have too much text and we don't want to aggregrate metrics for them here.
+                if "pose_trail" in k:
+                    delete = []
+                    for pk, pv in metrics[caseName][k].items():
+                        if "segments" in pk: delete.append(pk)
+                    for d in delete:
+                        del metrics[caseName][k][d]
+
     ametrics = aggregateMetrics(list(metrics.values()))
 
     # Delete the relative numbers so it's easier to copy-paste entries from this file

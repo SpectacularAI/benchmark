@@ -115,11 +115,14 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             for p in PERCENTILES:
                 s += ", " + percentileName(p)
     else:
-        mean = "{:.3g}".format(np.mean([metrics[x] for x in metrics]))
-        submetrics = "|".join(["{:.2g}".format(metrics[x]) for x in metrics])
+        keys = []
+        for k in metrics:
+            if not "segments" in k: keys.append(k)
+        mean = "{:.3g}".format(np.mean([metrics[x] for x in keys]))
+        submetrics = "|".join(["{:.2g}".format(metrics[x]) for x in keys])
         s += "{} ({})".format(mean, submetrics)
         if not short:
-            legend = " | ".join([x for x in metrics])
+            legend = " | ".join([x for x in keys])
             s += " -- [rel mean] mean, ({})".format(legend)
     return s
 
@@ -219,7 +222,7 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
         print("Expected orientation in ground truth")
         return
 
-    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio["poseTrails"], 3.0, gt)):
+    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio["poseTrails"], 1.0, gt)):
         x = []
         y = []
         for vioToGtWorld in segment["vioToGtWorlds"]:

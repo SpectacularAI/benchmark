@@ -335,7 +335,14 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
         assert(poseTrail.size > 0)
 
         # Skip pose trails in the beginning.
-        if poseTrail[0, 0] < t0 and poseTrail[-1, 0] - t0 < pieceLenSecs: continue
+        if poseTrail[-1, 0] < t0: continue
+
+        # If next pose trail is good one, skip this.
+        if poseTrailInd + 1 < len(poseTrails):
+            nt0 = poseTrails[poseTrailInd + 1][0, 0]
+            nt1 = poseTrails[poseTrailInd + 1][-1, 0]
+            if nt0 < t0 and nt1 - pieceLenSecs < t0: continue
+
         poseCount = poseTrail.shape[0]
         # poseInd0 is somewhere in the middle of the trail and poseInd1 is the current pose.
         poseInd0 = None
@@ -380,6 +387,7 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
 
         assert(poseTrail[poseInd0, 0] <= t0)
         t0 = poseTrail[poseInd1, 0]
+        # print("target len {}, got {}".format(pieceLenSecs, tVio1 - tVio0))
         yield {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
@@ -392,11 +400,26 @@ def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
     if len(vioPoseTrails) == 0: return None
     if gt["position"].size == 0 or gt["orientation"].size == 0: return None
 
+    from scipy.spatial.transform import Rotation
     err = []
+    segments = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
-        err.append(np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3]))
+        d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        # First vioToGtWorld is the same as first gt-to-world because of the alignment.
+        gtDistance = np.linalg.norm(segment["vioToGtWorlds"][0][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        Q = segment["vioToGtWorlds"][-1][:3, :3].transpose() @ segment["lastGtToWorld"][:3, :3]
+        t = segment["pieceLenSecs"]
+        speed = gtDistance / t if t > 0 else None
+        segments.append({
+            "positionErrorMeters": d,
+            "orientationErrorDegrees": np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)),
+            "pieceLengthSeconds": t,
+            "speed": speed,
+        })
+        err.append(d)
 
-    return np.sqrt(np.mean(np.array(err) ** 2))
+    rmse = np.sqrt(np.mean(np.array(err) ** 2))
+    return rmse, segments
 
 # Align 3-vectors such as velocity and angular velocity using rotation that matches the position tracks.
 def alignWithTrackRotation(vioData, vioPosition, gtPosition):
@@ -666,6 +689,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
 
     metricSets = info["metricSets"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
+    poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
 
     metrics = {}
     for metricSetStr in metricSets:
@@ -681,11 +705,11 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             if None in m.values(): m = None
             metrics[metricSetStr] = m
         elif metricSet == Metric.POSE_TRAIL_3D:
-            metrics[metricSetStr] = {
-                "1s": computePoseTrailMetric(vio["poseTrails"], gt, 1.0),
-                "3s": computePoseTrailMetric(vio["poseTrails"], gt, 3.0),
-                "10s": computePoseTrailMetric(vio["poseTrails"], gt, 10.0),
-            }
+            metrics[metricSetStr] = {}
+            for l in poseTrailLengths:
+                a, b = computePoseTrailMetric(vio["poseTrails"], gt, l)
+                metrics[metricSetStr][f"{l}s"] = a
+                metrics[metricSetStr][f"{l}s-segments"] = b
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
