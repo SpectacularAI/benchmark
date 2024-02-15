@@ -29,6 +29,9 @@ PERCENTILES = [95, 100]
 # How many seconds into future the position and orientation are predicted
 PREDICTION_SECONDS = 0.03
 
+# Augment pose trail metrics with orientation estimates from integrating gyroscope measurements.
+POSE_TRAIL_GYROSCOPE_INTEGRATION = True
+
 class Metric(Enum):
     # Track position error metrics:
     #
@@ -395,27 +398,48 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
             "pieceLenSecs": tVio1 - tVio0,
         }
 
-def computePoseTrailMetric(vioPoseTrails, gt, pieceLenSecs):
+def poseOrientationDiffDegrees(A, B):
+    from scipy.spatial.transform import Rotation
+    Q = A[:3, :3].transpose() @ B[:3, :3]
+    return np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True))
+
+def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     """RMSE of VIO position drift when comparing pose trail segments to ground truth"""
+    vioPoseTrails = vio["poseTrails"]
     if len(vioPoseTrails) == 0: return None
     if gt["position"].size == 0 or gt["orientation"].size == 0: return None
 
-    from scipy.spatial.transform import Rotation
+    gyroscope = None
+    if POSE_TRAIL_GYROSCOPE_INTEGRATION:
+        from .gyroscope_to_orientation import GyroscopeToOrientation
+        gyroscope = GyroscopeToOrientation(info["dir"])
+
+    warned = False
     err = []
     segments = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
         # First vioToGtWorld is the same as first gt-to-world because of the alignment.
         gtDistance = np.linalg.norm(segment["vioToGtWorlds"][0][:3, 3] - segment["lastGtToWorld"][:3, 3])
-        Q = segment["vioToGtWorlds"][-1][:3, :3].transpose() @ segment["lastGtToWorld"][:3, :3]
         t = segment["pieceLenSecs"]
         speed = gtDistance / t if t > 0 else None
         segments.append({
             "positionErrorMeters": d,
-            "orientationErrorDegrees": np.linalg.norm(Rotation.from_matrix(Q).as_rotvec(degrees=True)),
+            "orientationErrorDegrees": poseOrientationDiffDegrees(segment["vioToGtWorlds"][-1], segment["lastGtToWorld"]),
             "pieceLengthSeconds": t,
             "speed": speed,
         })
+        if gyroscope:
+            if len(vio["biasGyroscopeAdditive"]) == 0:
+                if not warned: print("Missing IMU bias estimates from VIO. Add `outputJsonExtras: True` to `vio_config.yaml`.")
+                warned = True
+                continue
+            biasInd = np.searchsorted(vio["biasGyroscopeAdditive"][:, 0], segment["vioTimes"][0])
+            bias = vio["biasGyroscopeAdditive"][biasInd, 1:]
+            imuVioToGtWorld1 = gyroscope.integrate(
+                segment["vioTimes"][0], segment["vioTimes"][-1], segment["vioToGtWorlds"][0], bias)
+            segments[-1]["gyroscopeOrientationErrorDegrees"] = poseOrientationDiffDegrees(imuVioToGtWorld1, segment["lastGtToWorld"])
+
         err.append(d)
 
     rmse = np.sqrt(np.mean(np.array(err) ** 2))
@@ -707,7 +731,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
         elif metricSet == Metric.POSE_TRAIL_3D:
             metrics[metricSetStr] = {}
             for l in poseTrailLengths:
-                a, b = computePoseTrailMetric(vio["poseTrails"], gt, l)
+                a, b = computePoseTrailMetric(vio, gt, l, info)
                 metrics[metricSetStr][f"{l}s"] = a
                 metrics[metricSetStr][f"{l}s-segments"] = b
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
@@ -808,7 +832,6 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
     method = None
     if "methodName" in info: method = info["methodName"].lower()
 
-    bias_norm = lambda x: np.sqrt(np.sum(x**2, axis=1))
     to_arr = lambda obj: [obj["x"], obj["y"], obj["z"]]
 
     position = []
@@ -817,8 +840,6 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
     angularVelocity = []
     acceleration = []
     bga = []
-    baa = []
-    bat = []
     stat = []
     idToTime = {}
     loopClosures = []
@@ -846,11 +867,6 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
                 av = row["acceleration"]
                 acceleration.append([t, av["x"], av["y"], av["z"]])
             stat.append(row.get("stationary", False))
-            if "biasMean" in row:
-                bga.append(to_arr(row["biasMean"]["gyroscopeAdditive"]))
-                baa.append(to_arr(row["biasMean"]["accelerometerAdditive"]))
-                if "accelerometerTransform" in row["biasMean"]:
-                    bat.append(to_arr(row["biasMean"]["accelerometerTransform"]))
             if "id" in row:
                 idToTime[row["id"]] = t
             if "loopClosureIds" in row:
@@ -872,6 +888,10 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
                     poseTrail.append([pose["time"], p["x"], p["y"], p["z"], q["x"], q["y"], q["z"], q["w"]])
                 if len(poseTrail) == 0: continue # Simplifies algorithms.
                 poseTrails.append(np.array(poseTrail))
+            # Currently needed only for a very niche pose trail metric.
+            if "biasMean" in row and getPoseTrails:
+                v = row["biasMean"]["gyroscopeAdditive"]
+                bga.append([t, v["x"], v["y"], v["z"]])
 
     VIO_OUTPUT_CACHE[key] = {
         'position': np.array(position),
@@ -879,13 +899,11 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
         'velocity': np.array(velocity),
         'angularVelocity': np.array(angularVelocity),
         'acceleration': np.array(acceleration),
-        'BGA': bias_norm(np.array(bga)) if bga else 0.0,
-        'BAA': bias_norm(np.array(baa)) if baa else 0.0,
-        'BAT': bias_norm(np.array(bat) - 1.0) if bat else 0.0,
         'stationary': np.array(stat),
         'loopClosures': loopClosures,
         'resets': resets,
         'poseTrails': poseTrails,
+        'biasGyroscopeAdditive': np.array(bga),
     }
     return VIO_OUTPUT_CACHE[key].copy()
 
