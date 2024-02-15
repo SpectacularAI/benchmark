@@ -689,6 +689,7 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
 
     metricSets = info["metricSets"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
+    poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
 
     metrics = {}
     for metricSetStr in metricSets:
@@ -705,8 +706,10 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             metrics[metricSetStr] = m
         elif metricSet == Metric.POSE_TRAIL_3D:
             metrics[metricSetStr] = {}
-            for l in [1, 2, 4]:
-                metrics[metricSetStr][f"{l}s"], metrics[metricSetStr][f"{l}s-segments"] = computePoseTrailMetric(vio["poseTrails"], gt, l)
+            for l in poseTrailLengths:
+                a, b = computePoseTrailMetric(vio["poseTrails"], gt, l)
+                metrics[metricSetStr][f"{l}s"] = a
+                metrics[metricSetStr][f"{l}s-segments"] = b
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
