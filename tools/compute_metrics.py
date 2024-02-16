@@ -334,6 +334,7 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
         return gtToWorld
 
     t0 = gt["position"][0, 0]
+    t00 = None
     for poseTrailInd, poseTrail in enumerate(poseTrails):
         assert(poseTrail.size > 0)
 
@@ -365,6 +366,20 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
 
         tVio0 = poseTrail[poseInd0, 0]
         tVio1 = poseTrail[poseInd1, 0]
+
+        assert(poseTrail[poseInd0, 0] <= t0)
+        t0 = poseTrail[poseInd1, 0]
+        # Tail of the pose trail segment is the same as in the previous one.
+        if tVio0 == t00: continue
+
+        t00 = poseTrail[poseInd0, 0]
+
+        # Too long segment.
+        if tVio1 - tVio0 > 3.0 * pieceLenSecs:
+            if poseTrailInd + 1 < len(poseTrails):
+                t0 = poseTrails[poseTrailInd + 1][0, 0]
+            continue
+
         if tVio1 > gt["position"][-1, 0]: break
         gtToWorld0 = interpolateGtPose(tVio0)
         gtToWorld1 = interpolateGtPose(tVio1)
@@ -388,9 +403,7 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
         # VIO accuracy is measured by comparing the poses at tVio1:
         #   metric(vioToGtWorlds[-1], gtToWorld1)
 
-        assert(poseTrail[poseInd0, 0] <= t0)
-        t0 = poseTrail[poseInd1, 0]
-        # print("target len {}, got {}".format(pieceLenSecs, tVio1 - tVio0))
+        # print("{} - {}, len {}".format(tVio0, tVio1, tVio1 - tVio0))
         yield {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
