@@ -406,8 +406,8 @@ def poseOrientationDiffDegrees(A, B):
 def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     """RMSE of VIO position drift when comparing pose trail segments to ground truth"""
     vioPoseTrails = vio["poseTrails"]
-    if len(vioPoseTrails) == 0: return None
-    if gt["position"].size == 0 or gt["orientation"].size == 0: return None
+    if len(vioPoseTrails) == 0: return None, None
+    if gt["position"].size == 0 or gt["orientation"].size == 0: return None, None
 
     gyroscope = None
     if POSE_TRAIL_GYROSCOPE_INTEGRATION:
@@ -419,6 +419,7 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     segments = []
     for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        err.append(d)
         # First vioToGtWorld is the same as first gt-to-world because of the alignment.
         gtDistance = np.linalg.norm(segment["vioToGtWorlds"][0][:3, 3] - segment["lastGtToWorld"][:3, 3])
         t = segment["pieceLenSecs"]
@@ -440,8 +441,7 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
                 segment["vioTimes"][0], segment["vioTimes"][-1], segment["vioToGtWorlds"][0], bias)
             segments[-1]["gyroscopeOrientationErrorDegrees"] = poseOrientationDiffDegrees(imuVioToGtWorld1, segment["lastGtToWorld"])
 
-        err.append(d)
-
+    if len(err) == 0: return None, None
     rmse = np.sqrt(np.mean(np.array(err) ** 2))
     return rmse, segments
 
