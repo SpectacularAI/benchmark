@@ -1004,15 +1004,3 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
             metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': ')))
         return computeSummaryValue(metricsJson)
     return None
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("benchmarkFolder")
-    parser.add_argument("caseName")
-    parser.add_argument('--baseline', default=None)
-    parser.add_argument("--sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float)
-    args = parser.parse_args()
-
-    result = computeMetrics(args.benchmarkFolder, args.caseName, args.baseline, args.sampleIntervalForVelocity)
-    print(result)
