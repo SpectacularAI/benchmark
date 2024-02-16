@@ -2,34 +2,49 @@
 
 Benchmarking toolset that can plot trajectories and compute different metrics for VISLAM algorithms.
 
-## Usage
+## Usage example
 
-Examples directory contains `two_sessions` dataset which has ground truth and output trajectory for two sessions. You can run the benchmark for these using following command, the output will be under `output` directory.
+The directory `examples/two_sessions` contains an example dataset that has ground truth and VISLAM output trajectories for two sessions. You can run the benchmark for these using following command, and the output will be created under `output` directory:
 
-```
+```bash
 python run.py -dataDir examples/two_sessions
 ```
 
-The `run.py` can also calculate the output trajectory from data recorded through Spectacualar SDK if it's not provided as `output.jsonl` file.
+See the options with `python run.py --help`.
 
 ## Benchmark data
 
-The data layout should use following convention, session_a has just the output, session_b has the video and IMU data required to calculate output using Spectacular AI SDK:
+The `run.py` script can also calculate the output trajectories from sensor data [recorded through Spectacular AI SDK](https://spectacularai.github.io/docs/sdk/recording.html). The format is partly documented [here](https://github.com/AaltoML/vio_benchmark#jsonl-format).
+
+The recording folders should be placed in a common folder, say `sessions/`, for example like this:
+
 ```
-session_a/
-    output.jsonl
-    groundtruth.jsonl
-session_b/
-    calibration.json
-    data2.mkv
+session01/
     data.jsonl
     data.mkv
+    data2.mkv
+    calibration.json
+    vio_config.yaml
     groundtruth.jsonl
+session02/
+    data.jsonl
+    data.mkv
+    calibration.json
+    vio_config.yaml
+session03/
+    output.jsonl
+    groundtruth.jsonl
+```
+
+In case of `session02/` the `groundtruth.jsonl` lines may have been mixed into the `data.jsonl` file. Then the benchmark can be run with:
+
+```bash
+pip install spectacularAI numpy scipy matplotlib
+python run.py -dataDir sessions
 ```
 
 ## Copyright
 
-Based on https://github.com/AaltoML/vio_benchmark
+Based on <https://github.com/AaltoML/vio_benchmark>.
 
 This repository is licensed under Apache 2.0 (see LICENSE).
-
