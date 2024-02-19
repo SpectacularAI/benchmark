@@ -5,7 +5,8 @@ import math
 import os
 import pathlib
 
-from .compute_metrics import readDatasets, readVioOutput, align, Metric, metricSetToAlignmentParams, isSparse
+from .load import readDatasets, readVioOutput
+from .compute_metrics import align, Metric, metricSetToAlignmentParams, isSparse
 from .compute_metrics import computeVelocity, preComputeAlignedVelocity
 from .compute_metrics import computeAngularVelocity, preComputeAlignedAngularVelocity
 from .compute_metrics import computeOrientationErrors, OrientationAlign
