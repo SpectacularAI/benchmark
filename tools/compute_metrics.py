@@ -6,6 +6,7 @@ import numpy as np
 from .load import readDatasets, readVioOutput
 from .metric import *
 from .metric_pose_trail import computePoseTrailMetric
+from .align import align, getOverlap
 
 # Track types to be used as ground-truth. In lowercase.
 # Instead of adding entries to this list, consider converting your dataset to have "groundTruth" rows.

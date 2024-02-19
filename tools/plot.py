@@ -6,6 +6,7 @@ import pathlib
 from .load import readDatasets, readVioOutput
 from .metric import *
 from .metric_pose_trail import generatePoseTrailMetricSegments
+from .align import align, isSparse, getOverlap
 
 import numpy as np
 
