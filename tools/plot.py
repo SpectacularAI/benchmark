@@ -1,18 +1,10 @@
-#!/usr/bin/env python3
-
 import json
 import math
 import os
 import pathlib
 
 from .load import readDatasets, readVioOutput
-from .compute_metrics import align, Metric, metricSetToAlignmentParams, isSparse
-from .compute_metrics import computeVelocity, preComputeAlignedVelocity
-from .compute_metrics import computeAngularVelocity, preComputeAlignedAngularVelocity
-from .compute_metrics import computeOrientationErrors, OrientationAlign
-from .compute_metrics import computePredictionError, getOverlap, PREDICTION_SECONDS
-from .compute_metrics import generatePoseTrailMetricSegments
-from .compute_metrics import PERCENTILES, percentileName
+from .metric import *
 
 import numpy as np
 
