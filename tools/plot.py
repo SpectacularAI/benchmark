@@ -122,7 +122,6 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
     return s
 
 def plotVelocity(args, vio, tracks, axis, speed=False):
-    import matplotlib.pyplot as plt
     if len(tracks) >= 1:
         preComputeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
@@ -151,7 +150,6 @@ def plotVelocity(args, vio, tracks, axis, speed=False):
                     color=getColor(d['name']), linewidth=1)
 
 def plotAngularVelocity(args, vio, tracks, axis, speed=False):
-    import matplotlib.pyplot as plt
     if len(tracks) >= 1:
         preComputeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
         data = [tracks[0], vio]
@@ -180,7 +178,6 @@ def plotAngularVelocity(args, vio, tracks, axis, speed=False):
                     color=getColor(d['name']), linewidth=1)
 
 def plotOrientationErrors(args, vio, tracks, axis, full=False, alignType=OrientationAlign.TRAJECTORY):
-    import matplotlib.pyplot as plt
     if len(tracks) == 0 or len(tracks[0].get("orientation", [])) == 0:
         return
     orientationErrors = computeOrientationErrors(vio, tracks[0], alignType)
@@ -228,7 +225,6 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
         axis.plot(x, y, label=label, color=getColor(vio["name"]), linewidth=1)
 
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
-    import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
 
     # Align all tracks with ground truth.
@@ -278,121 +274,66 @@ def figureSize(num_plots):
         return (20,20)
     return (30,30)
 
-def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
-    if not args.showPlot:
-        import matplotlib
-        matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
+def plotMetricSet(args, plotAxis, vio, tracks, tracksWithVio, benchmarkFolder, caseName, caseNameInd, sharedInfo, metricSet):
+    titleStr = caseName
+    caseMetrics = None
+    relativeMetric = None
 
-    caseCount = len(caseNames)
-    columns = int(math.sqrt(caseCount))
-    if pow(columns, 2) < caseCount: columns += 1
-    rows = columns
+    caseInfoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
+    with open(caseInfoPath) as caseInfoJsonFile:
+        caseInfo = json.loads(caseInfoJsonFile.read())
+    fixOrigin = "fixOrigin" in caseInfo and caseInfo["fixOrigin"]
 
-    figure, subplots = plt.subplots(rows, columns, figsize=figureSize(caseCount))
-    subplots = np.ravel(subplots)
+    caseMetricsPath = "{}/metrics/{}.json".format(benchmarkFolder, caseName)
+    if os.path.exists(caseMetricsPath):
+        with open(caseMetricsPath) as caseMetricsJsonFile:
+            metrics = json.loads(caseMetricsJsonFile.read())
+            if metricSet in metrics:
+                caseMetrics = metrics[metricSet]
+            if "relative" in metrics and metricSet in metrics["relative"]:
+                relativeMetric = metrics["relative"][metricSet]
 
-    getPoseTrails = metricSet == Metric.POSE_TRAIL_3D.value
+    ax1 = 1
+    ax2 = 3 if args.z_axis else 2
 
-    for i, caseName in enumerate(caseNames):
-        try:
-            titleStr = caseName
-            caseMetrics = None
-            relativeMetric = None
-            plotAxis = subplots[i]
-
-            caseInfoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
-            with open(caseInfoPath) as caseInfoJsonFile:
-                caseInfo = json.loads(caseInfoJsonFile.read())
-            fixOrigin = "fixOrigin" in caseInfo and caseInfo["fixOrigin"]
-
-            caseMetricsPath = "{}/metrics/{}.json".format(benchmarkFolder, caseName)
-            if os.path.exists(caseMetricsPath):
-                with open(caseMetricsPath) as caseMetricsJsonFile:
-                    metrics = json.loads(caseMetricsJsonFile.read())
-                    if metricSet in metrics:
-                        caseMetrics = metrics[metricSet]
-                    if "relative" in metrics and metricSet in metrics["relative"]:
-                        relativeMetric = metrics["relative"][metricSet]
-
-            tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
-            postprocessed = metricSet == Metric.POSTPROCESSED.value
-            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed, getPoseTrails)
-
-            vio["name"] = sharedInfo["methodName"]
-            ax1 = 1
-            ax2 = 3 if args.z_axis else 2
-
-            if metricSet == Metric.ANGULAR_VELOCITY.value:
-                if not args.z_axis: plotAngularVelocity(args, vio, tracks, plotAxis)
-                else: plotAngularVelocity(args, vio, tracks, plotAxis, speed=True)
-            elif metricSet == Metric.VELOCITY.value:
-                if not args.z_axis: plotVelocity(args, vio, tracks, plotAxis)
-                else: plotVelocity(args, vio, tracks, plotAxis, speed=True)
-            elif postprocessed:
-                tracks.append(vio)
-                # Align using the (sparse) postprocessed VIO time grid.
-                gtInd = len(tracks) - 1 if len(tracks) >= 2 else None
-                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
-            elif metricSet == Metric.ORIENTATION.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
-            elif metricSet == Metric.ORIENTATION_FULL.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
-            elif metricSet == Metric.ORIENTATION_ALIGNED.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
-            elif metricSet == Metric.PREDICTION.value:
-                plotPredictionError(args, vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
-            elif metricSet == Metric.POSE_TRAIL_3D.value:
-                plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2)
-            else:
-                tracks.append(vio)
-                gtInd = 0 if len(tracks) >= 2 else None
-                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
-
-            # Draw legend
-            for item in plotAxis.get_xticklabels() + plotAxis.get_yticklabels():
-                item.set_size(6)
-
-            # Set titles
-            if caseMetrics:
-                if titleStr: titleStr += "\n"
-                if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
-                    titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
-                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
-            plotAxis.title.set_text(titleStr)
-
-            _, labels = plotAxis.get_legend_handles_labels()
-            if len(labels) > 0: plotAxis.legend()
-
-        except Exception as e:
-            if caseCount > 1:
-                # For aggregate plots do not crash the entire plot but mark the failed case.
-                plotAxis.set_title("FAILED {}\n{}".format(titleStr, e), color="red")
-                continue
-            else:
-                raise(e)
-
-
-    # Title for aggregate plot.
-    if not args.caseName:
-        suptitle = ""
-        if sharedInfo["parameters"]:
-            suptitle += wordWrap(sharedInfo["parameters"])
-        suptitle += "\n"
-        if sharedInfo["metrics"]:
-            relativeMetric = None
-            if "relative" in sharedInfo["metrics"] and sharedInfo["metrics"]["relative"] and metricSet in sharedInfo["metrics"]["relative"]:
-                relativeMetric = sharedInfo["metrics"]["relative"][metricSet]
-            suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False)
-        figure.suptitle(suptitle, fontsize=20)
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-
-    if args.showPlot:
-        plt.show()
+    if metricSet == Metric.ANGULAR_VELOCITY.value:
+        if not args.z_axis: plotAngularVelocity(args, vio, tracks, plotAxis)
+        else: plotAngularVelocity(args, vio, tracks, plotAxis, speed=True)
+    elif metricSet == Metric.VELOCITY.value:
+        if not args.z_axis: plotVelocity(args, vio, tracks, plotAxis)
+        else: plotVelocity(args, vio, tracks, plotAxis, speed=True)
+    elif metricSet == Metric.POSTPROCESSED.value:
+        # Align using the (sparse) postprocessed VIO time grid.
+        gtInd = len(tracksWithVio) - 1 if len(tracksWithVio) >= 2 else None
+        plot2dTracks(args, tracksWithVio, gtInd, plotAxis, ax1, ax2, metricSet, True, fixOrigin)
+    elif metricSet == Metric.ORIENTATION.value:
+        plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
+    elif metricSet == Metric.ORIENTATION_FULL.value:
+        plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
+    elif metricSet == Metric.ORIENTATION_ALIGNED.value:
+        plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+    elif metricSet == Metric.PREDICTION.value:
+        plotPredictionError(args, vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
+    elif metricSet == Metric.POSE_TRAIL_3D.value:
+        plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2)
     else:
-        figurePath = getFigurePath("{}/figures".format(benchmarkFolder), metricSet, args.caseName, args.z_axis)
-        figure.savefig(figurePath)
-    plt.close(figure)
+        gtInd = 0 if len(tracksWithVio) >= 2 else None
+        plot2dTracks(args, tracksWithVio, gtInd, plotAxis, ax1, ax2, metricSet, False, fixOrigin)
+
+    # Draw legend
+    for item in plotAxis.get_xticklabels() + plotAxis.get_yticklabels():
+        item.set_size(6)
+
+    # Set titles
+    if caseMetrics:
+        if titleStr: titleStr += "\n"
+        if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
+            titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
+        titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
+    plotAxis.title.set_text(titleStr)
+
+    _, labels = plotAxis.get_legend_handles_labels()
+    if len(labels) > 0: plotAxis.legend()
 
 def plotBenchmark(args, benchmarkFolder):
     if not pathlib.Path(benchmarkFolder).exists():
@@ -416,15 +357,76 @@ def plotBenchmark(args, benchmarkFolder):
         metricSets = list(m.keys()) if m else ["piecewise"]
         metricSets = [m for m in metricSets if m != "relative"]
 
+    if not args.showPlot:
+        import matplotlib
+        matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    caseCount = len(caseNames)
+    columns = int(math.sqrt(caseCount))
+    if pow(columns, 2) < caseCount: columns += 1
+    rows = columns
+
+    figures = []
+    subplots = []
+    for ind in range(len(metricSets)):
+        figure, s = plt.subplots(rows, columns, figsize=figureSize(caseCount))
+        subplots.append(np.ravel(s))
+        figures.append(figure)
+
+    for caseNameInd, caseName in enumerate(caseNames):
+        # Do the potentially heavy data loading once per case, not per plot.
+        tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
+        getPoseTrails = Metric.POSE_TRAIL_3D.value in metricSets
+        postprocessed = Metric.POSTPROCESSED.value in metricSets
+        vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed, getPoseTrails)
+        vio["name"] = sharedInfo["methodName"]
+
+        tracksWithVio = tracks.copy()
+        tracksWithVio.append(vio)
+
+        for ind, metricSet in enumerate(metricSets):
+            # Plotting is somewhat slow. Could skip eg for CPU_TIME if there
+            # was some other convenient way to present the results besides the aggregate figure.
+            if args.z_axis:
+                if metricSet == Metric.ORIENTATION.value: continue
+                if metricSet == Metric.ORIENTATION_FULL.value: continue
+                if metricSet == Metric.ORIENTATION_ALIGNED.value: continue
+                if metricSet == Metric.PREDICTION.value: continue
+
+            plotAxis = subplots[ind][caseNameInd]
+            try:
+                plotMetricSet(args, plotAxis, vio, tracks, tracksWithVio, benchmarkFolder, caseName, caseNameInd, sharedInfo, metricSet)
+            except Exception as e:
+                if caseCount > 1:
+                    # For aggregate plots do not crash the entire plot but mark the failed case.
+                    plotAxis.set_title("FAILED {}\n{}".format(titleStr, e), color="red")
+                    continue
+                else:
+                    raise(e)
+
     for ind, metricSet in enumerate(metricSets):
-        # TODO Plotting is somewhat slow. Could skip eg for CPU_TIME if there
-        # was some other convenient way to present the results besides the aggregate figure.
-        if args.z_axis:
-            if metricSet == Metric.ORIENTATION.value: continue
-            if metricSet == Metric.ORIENTATION_FULL.value: continue
-            if metricSet == Metric.ORIENTATION_ALIGNED.value: continue
-            if metricSet == Metric.PREDICTION.value: continue
-        plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
+        figure = figures[ind]
+        # Title for aggregate plot.
+        if not args.caseName:
+            suptitle = ""
+            if sharedInfo["parameters"]:
+                suptitle += wordWrap(sharedInfo["parameters"])
+            suptitle += "\n"
+            if sharedInfo["metrics"]:
+                relativeMetric = None
+                if "relative" in sharedInfo["metrics"] and sharedInfo["metrics"]["relative"] and metricSet in sharedInfo["metrics"]["relative"]:
+                    relativeMetric = sharedInfo["metrics"]["relative"][metricSet]
+                suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False)
+            figure.suptitle(suptitle, fontsize=20)
+            figure.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+        if args.showPlot:
+            figure.show()
+        else:
+            figurePath = getFigurePath("{}/figures".format(benchmarkFolder), metricSet, args.caseName, args.z_axis)
+            figure.savefig(figurePath)
+        plt.close(figure)
 
 def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
     import argparse
