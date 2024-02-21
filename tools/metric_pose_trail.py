@@ -128,6 +128,7 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
             "orientationErrorDegrees": poseOrientationDiffDegrees(segment["vioToGtWorlds"][-1], segment["lastGtToWorld"]),
             "pieceLengthSeconds": t,
             "speed": speed,
+            "time": segment["vioTimes"][-1],
         })
         if gyroscope:
             if len(vio["biasGyroscopeAdditive"]) == 0:

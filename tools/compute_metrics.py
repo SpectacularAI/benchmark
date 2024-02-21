@@ -83,6 +83,8 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.AVERAGE_ORIENTATION)
         elif metricSet == Metric.PREDICTION:
             metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
+        elif metricSet == Metric.TRACKING_QUALITY:
+            metrics[metricSetStr] = None # TODO
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics

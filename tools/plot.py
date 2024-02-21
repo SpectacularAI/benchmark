@@ -179,7 +179,7 @@ def plotAngularVelocity(args, vio, tracks, axis, speed=False):
                 axis.plot(avs[:, 0], avs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
-def plotOrientationErrors(args, vio, tracks, axis, full=False, alignType=OrientationAlign.TRAJECTORY):
+def plotOrientationErrors(vio, tracks, axis, full=False, alignType=OrientationAlign.TRAJECTORY):
     import matplotlib.pyplot as plt
     if len(tracks) == 0 or len(tracks[0].get("orientation", [])) == 0:
         return
@@ -189,7 +189,7 @@ def plotOrientationErrors(args, vio, tracks, axis, full=False, alignType=Orienta
         axis.plot(orientationErrors["time"], orientationErrors["gravity"], label="Gravity")
         axis.plot(orientationErrors["time"], orientationErrors["heading"], label="Heading")
 
-def plotPredictionError(args, vio, axis, predictSeconds):
+def plotPredictionError(vio, axis, predictSeconds):
     (newVio, orientationErrors) = computePredictionError(vio, predictSeconds)
     overlappingNewPos, overlappingVioPos, posTime = getOverlap(newVio["position"], vio["position"], includeTime=True)
     positionError = np.linalg.norm(overlappingNewPos - overlappingVioPos, axis=1)
@@ -199,6 +199,22 @@ def plotPredictionError(args, vio, axis, predictSeconds):
     ax2.plot(orientationErrors["time"], orientationErrors["total"], color='orange')
     axis.set_ylabel('Position (mm)', color='teal', fontweight='bold')
     ax2.set_ylabel('Orientation (°)', color='orange', fontweight='bold')
+
+def plotTrackingQuality(vio, axis, metrics):
+    axis.set_ylim([-0.05, 1.05])
+    axis.plot(vio["trackingQuality"][:, 0], vio["trackingQuality"][:, 1], label="tracking quality")
+
+    t = []
+    err = []
+    for segment in metrics["pose_trail_3d"]["0.1s-segments"]:
+        t.append(segment["time"])
+        err.append(segment["orientationErrorDegrees"])
+        # err.append(segment["positionErrorMeters"])
+    err = np.array(err)
+    errMax = err.max()
+    if errMax > 0: err /= errMax
+    # axis.plot(t, err, label="segment position error")
+    axis.plot(t, err, label="segment orintation error")
 
 def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
     if len(tracks) == 0:
@@ -292,7 +308,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     figure, subplots = plt.subplots(rows, columns, figsize=figureSize(caseCount))
     subplots = np.ravel(subplots)
 
-    getPoseTrails = metricSet == Metric.POSE_TRAIL_3D.value
+    getPoseTrails = metricSet in [Metric.POSE_TRAIL_3D.value, Metric.TRACKING_QUALITY.value]
 
     for i, caseName in enumerate(caseNames):
         try:
@@ -335,13 +351,15 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 gtInd = len(tracks) - 1 if len(tracks) >= 2 else None
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
             elif metricSet == Metric.ORIENTATION.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
+                plotOrientationErrors(vio, tracks, plotAxis, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_FULL.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
+                plotOrientationErrors(vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_ALIGNED.value:
-                plotOrientationErrors(args, vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+                plotOrientationErrors(vio, tracks, plotAxis, alignType=OrientationAlign.AVERAGE_ORIENTATION)
             elif metricSet == Metric.PREDICTION.value:
-                plotPredictionError(args, vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
+                plotPredictionError(vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
+            elif metricSet == Metric.TRACKING_QUALITY.value:
+                plotTrackingQuality(vio, plotAxis, metrics)
             elif metricSet == Metric.POSE_TRAIL_3D.value:
                 plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2)
             else:
@@ -362,7 +380,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             plotAxis.title.set_text(titleStr)
 
             _, labels = plotAxis.get_legend_handles_labels()
-            if len(labels) > 0: plotAxis.legend()
+            if i == 0 and len(labels) > 0: plotAxis.legend()
 
         except Exception as e:
             if caseCount > 1:
@@ -419,11 +437,8 @@ def plotBenchmark(args, benchmarkFolder):
     for ind, metricSet in enumerate(metricSets):
         # TODO Plotting is somewhat slow. Could skip eg for CPU_TIME if there
         # was some other convenient way to present the results besides the aggregate figure.
-        if args.z_axis:
-            if metricSet == Metric.ORIENTATION.value: continue
-            if metricSet == Metric.ORIENTATION_FULL.value: continue
-            if metricSet == Metric.ORIENTATION_ALIGNED.value: continue
-            if metricSet == Metric.PREDICTION.value: continue
+        if args.z_axis and metricSet in [Metric.ORIENTATION.value, Metric.ORIENTATION_FULL.value, Metric.ORIENTATION_ALIGNED.value, Metric.PREDICTION.value, Metric.TRACKING_QUALITY.value]:
+            continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
 def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
