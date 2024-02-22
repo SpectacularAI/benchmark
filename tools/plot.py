@@ -204,17 +204,15 @@ def plotTrackingQuality(vio, axis, metrics):
     axis.set_ylim([-0.05, 1.05])
     axis.plot(vio["trackingQuality"][:, 0], vio["trackingQuality"][:, 1], label="tracking quality")
 
-    t = []
-    err = []
-    for segment in metrics["pose_trail_3d"]["0.1s-segments"]:
-        t.append(segment["time"])
-        err.append(segment["orientationErrorDegrees"])
-        # err.append(segment["positionErrorMeters"])
-    err = np.array(err)
-    errMax = err.max()
-    if errMax > 0: err /= errMax
-    # axis.plot(t, err, label="segment position error")
-    axis.plot(t, err, label="segment orintation error")
+    if metrics is not None and "pose_trail_3d" in metrics and "1.0s-segments" in metrics["pose_trail_3d"]:
+        t = []
+        err = []
+        for segment in metrics["pose_trail_3d"]["1.0s-segments"]:
+            t.append(segment["time"])
+            err.append(segment["positionErrorMeters"])
+        err = np.array(err)
+        err *= 10
+        axis.plot(t, err, label="segment position error")
 
 def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
     if len(tracks) == 0:
@@ -322,6 +320,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 caseInfo = json.loads(caseInfoJsonFile.read())
             fixOrigin = "fixOrigin" in caseInfo and caseInfo["fixOrigin"]
 
+            metrics = None
             caseMetricsPath = "{}/metrics/{}.json".format(benchmarkFolder, caseName)
             if os.path.exists(caseMetricsPath):
                 with open(caseMetricsPath) as caseMetricsJsonFile:

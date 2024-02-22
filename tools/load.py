@@ -72,6 +72,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
     resets = []
     trackingQuality = []
     poseTrails = []
+    velocityCovariances = []
     with open(outputPath) as f:
         for line in f.readlines():
             row = json.loads(line)
@@ -107,6 +108,8 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
                 if row["status"] == "LOST_TRACKING": resets.append(t)
             if "trackingQuality" in row:
                 trackingQuality.append([t, row["trackingQuality"]])
+            if "velocityCovariance" in row and getPoseTrails:
+                velocityCovariances.append((t, np.array(row["velocityCovariance"])))
             # May be slow, get only of needed.
             if "poseTrail" in row and getPoseTrails:
                 poseTrail = []
@@ -134,6 +137,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
         'trackingQuality': np.array(trackingQuality),
         'poseTrails': poseTrails,
         'biasGyroscopeAdditive': np.array(bga),
+        'velocityCovariances': velocityCovariances,
     }
     return VIO_OUTPUT_CACHE[key].copy()
 
