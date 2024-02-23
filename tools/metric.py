@@ -58,6 +58,8 @@ class Metric(Enum):
     ORIENTATION_ALIGNED = "orientation_aligned"
     # Error when predicting position and orientation forward in time
     PREDICTION = "prediction"
+    # Correlation of VIO tracking quality estimate to momentary tracking accuracy.
+    TRACKING_QUALITY = "tracking_quality"
 
 def metricSetToAlignmentParams(metricSet):
     if metricSet in [
@@ -66,7 +68,6 @@ def metricSetToAlignmentParams(metricSet):
         Metric.COVERAGE,
         Metric.PIECEWISE,
         Metric.PIECEWISE_NO_Z,
-        Metric.POSE_TRAIL_3D,
     ]:
         return {} # The defaults are correct.
     elif metricSet == Metric.NO_ALIGN:
@@ -76,7 +77,7 @@ def metricSetToAlignmentParams(metricSet):
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
     elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
-        return {} # No natural alignment for these.
+        return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
 

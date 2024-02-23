@@ -512,7 +512,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         raise Exception("-skipBenchmark requires -runId.")
 
     metricSets = args.metricSet.split(",")
-    if "pose_trail" in metricSets or "pose_trail_3d" in metricSets:
+    if "pose_trail" in metricSets or "pose_trail_3d" in metricSets or "tracking_quality" in metricSets:
         args.savePoseTrail = True
 
     def withMkdir(dir):
