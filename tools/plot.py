@@ -231,7 +231,7 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
         print("Expected orientation in ground truth")
         return
 
-    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio["poseTrails"], 1.0, gt)):
+    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio, 1.0, gt)):
         x = []
         y = []
         for vioToGtWorld in segment["vioToGtWorlds"]:

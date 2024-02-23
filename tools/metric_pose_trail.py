@@ -6,7 +6,8 @@ POSE_TRAIL_GYROSCOPE_INTEGRATION = True
 # Generate slightly overlapping pose trail segments of length `pieceLenSecs`, over the timespan of `gt`.
 # The segments are cut from the current end of the pose trail. The segment is aligned by matching
 # the pose of the older end to the `gt` pose at the same timestamp (interpolated).
-def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
+def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
+    poseTrails = vio["poseTrails"]
     from scipy.spatial.transform import Rotation, Slerp
 
     qGt = Rotation.from_quat(gt["orientation"][:, 1:])
@@ -90,12 +91,17 @@ def generatePoseTrailMetricSegments(poseTrails, pieceLenSecs, gt):
         #   metric(vioToGtWorlds[-1], gtToWorld1)
 
         # print("{} - {}, len {}".format(tVio0, tVio1, tVio1 - tVio0))
-        yield {
+        out = {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
             "lastGtToWorld": gtToWorld1,
             "pieceLenSecs": tVio1 - tVio0,
+            "trackingQuality": None,
         }
+        if len(vio["trackingQuality"]) > 0:
+            qualityInd = np.searchsorted(vio["trackingQuality"][:, 0], tVio1)
+            out["trackingQuality"] = vio["trackingQuality"][qualityInd, 1]
+        yield out
 
 def poseOrientationDiffDegrees(A, B):
     from scipy.spatial.transform import Rotation
@@ -104,8 +110,7 @@ def poseOrientationDiffDegrees(A, B):
 
 def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     """RMSE of VIO position drift when comparing pose trail segments to ground truth"""
-    vioPoseTrails = vio["poseTrails"]
-    if len(vioPoseTrails) == 0: return None, None
+    if len(vio["poseTrails"]) == 0: return None, None
     if gt["position"].size == 0 or gt["orientation"].size == 0: return None, None
 
     gyroscope = None
@@ -116,7 +121,7 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     warned = False
     err = []
     segments = []
-    for segment in generatePoseTrailMetricSegments(vioPoseTrails, pieceLenSecs, gt):
+    for segment in generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
         err.append(d)
         # First vioToGtWorld is the same as first gt-to-world because of the alignment.
@@ -129,6 +134,7 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
             "pieceLengthSeconds": t,
             "speed": speed,
             "time": segment["vioTimes"][-1],
+            "trackingQuality": segment["trackingQuality"],
         })
         if gyroscope:
             if len(vio["biasGyroscopeAdditive"]) == 0:
