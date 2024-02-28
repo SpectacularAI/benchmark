@@ -3,7 +3,9 @@ import numpy as np
 # Augment pose trail metrics with orientation estimates from integrating gyroscope measurements.
 POSE_TRAIL_GYROSCOPE_INTEGRATION = True
 
-USE_WHOLE_TRACK = True
+USE_WHOLE_TRACK = False
+
+DENSE_TRAILS = True
 
 # Generate slightly overlapping pose trail segments of length `pieceLenSecs`, over the timespan of `gt`.
 # The segments are cut from the current end of the pose trail. The segment is aligned by matching
@@ -27,14 +29,15 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
     for poseTrailInd, poseTrail in enumerate(poseTrails):
         assert(poseTrail.size > 0)
 
-        # Skip pose trails in the beginning.
-        if poseTrail[-1, 0] < t0: continue
+        if not DENSE_TRAILS:
+            # Skip pose trails in the beginning.
+            if poseTrail[-1, 0] < t0: continue
 
-        # If next pose trail is good one, skip this.
-        if poseTrailInd + 1 < len(poseTrails):
-            nt0 = poseTrails[poseTrailInd + 1][0, 0]
-            nt1 = poseTrails[poseTrailInd + 1][-1, 0]
-            if nt0 < t0 and nt1 - pieceLenSecs < t0: continue
+            # If next pose trail is good one, skip this.
+            if poseTrailInd + 1 < len(poseTrails):
+                nt0 = poseTrails[poseTrailInd + 1][0, 0]
+                nt1 = poseTrails[poseTrailInd + 1][-1, 0]
+                if nt0 < t0 and nt1 - pieceLenSecs < t0: continue
 
         poseCount = poseTrail.shape[0]
         # poseInd0 is somewhere in the middle of the trail and poseInd1 is the current pose.
@@ -45,23 +48,31 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
             if poseTrail[i, 0] <= t0:
                 poseInd0 = i
                 break
+
         if poseInd0 is None:
-            # The whole pose trail was shorter than `pieceLenSecs`, skip a part in the ground
-            # truth by setting `t0` so that it will work with the next pose trail.
-            # Could compute some kind of accompanying "coverage" metric.
-            if poseTrailInd + 1 < len(poseTrails):
-                t0 = poseTrails[poseTrailInd + 1][0, 0]
-            continue
+            if DENSE_TRAILS and poseTrail[0, 0] <= t0:
+                poseInd0 = 0
+            else:
+                # The whole pose trail was shorter than `pieceLenSecs`, skip a part in the ground
+                # truth by setting `t0` so that it will work with the next pose trail.
+                # Could compute some kind of accompanying "coverage" metric.
+                if poseTrailInd + 1 < len(poseTrails):
+                    t0 = poseTrails[poseTrailInd + 1][0, 0]
+                continue
 
         tVio0 = poseTrail[poseInd0, 0]
         tVio1 = poseTrail[poseInd1, 0]
         assert(poseTrail[poseInd0, 0] <= t0)
-        t0 = poseTrail[poseInd1, 0]
+        if DENSE_TRAILS:
+            t0 = tVio1 - pieceLenSecs
+        else:
+            t0 = poseTrail[poseInd1, 0]
+
         # Tail of the pose trail segment is the same as in the previous one.
         if tVio0 == t00: continue
         t00 = poseTrail[poseInd0, 0]
         # Too long segment.
-        if tVio1 - tVio0 > 3.0 * pieceLenSecs:
+        if not DENSE_TRAILS and tVio1 - tVio0 > 3.0 * pieceLenSecs:
             if poseTrailInd + 1 < len(poseTrails):
                 t0 = poseTrails[poseTrailInd + 1][0, 0]
             continue
