@@ -25,9 +25,7 @@ class GyroscopeToOrientation:
             if obj["sensor"]["type"] != "gyroscope": continue
             v = obj["sensor"]["values"]
             # Must be sorted.
-            if t is not None and obj["time"] <= t:
-                print("Unordered/equal gyroscope timestamps, skipping")
-                continue
+            if t is not None and obj["time"] <= t: continue
             t = obj["time"]
             g.append([t, v[0], v[1], v[2]])
         self.g = np.array(g)
