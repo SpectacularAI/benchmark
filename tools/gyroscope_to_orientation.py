@@ -34,7 +34,7 @@ class GyroscopeToOrientation:
 
         calibration = readJson(pathlib.Path(datasetPath) / "calibration.json")
         if "imuToOutput" in calibration:
-            imuToOutput = np.array(calibration["imuToOutput"])
+            self.imuToOutput = np.array(calibration["imuToOutput"])
 
     def integrate(self, t0, t1, outputToWorld0, bias):
         """Integrate gyroscope samples between t0 and t1 into outputToWorld matrix and return the result matrix"""
