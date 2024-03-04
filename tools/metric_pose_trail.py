@@ -9,9 +9,17 @@ USE_WHOLE_TRACK = False
 # Generate slightly overlapping pose trail segments of length `pieceLenSecs`, over the timespan of `gt`.
 # The segments are cut from the current end of the pose trail. The segment is aligned by matching
 # the pose of the older end to the `gt` pose at the same timestamp (interpolated).
-def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
+def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
     poseTrails = vio["poseTrails"]
     from scipy.spatial.transform import Rotation, Slerp
+
+    gyroscope = None
+    if POSE_TRAIL_GYROSCOPE_INTEGRATION:
+        if len(vio["biasGyroscopeAdditive"]) == 0:
+            print("Missing IMU bias estimates from VIO. Add `outputJsonExtras: True` to `vio_config.yaml`.")
+        else:
+            from .gyroscope_to_orientation import GyroscopeToOrientation
+            gyroscope = GyroscopeToOrientation(info["dir"], vio["velocity"])
 
     qGt = Rotation.from_quat(gt["orientation"][:, 1:])
     slerp = Slerp(gt["orientation"][:, 0], qGt)
@@ -103,6 +111,19 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
                 vioToWorld[:3, :3] = Rotation.from_quat(poseTrail[i, 4:8]).as_matrix()
                 vioToGtWorlds.append(vioWorldToGtWorld @ vioToWorld)
 
+        inertialVioToGtWorlds = []
+        inertialVioTimes = []
+        if gyroscope:
+            biasGyroscopeInd = np.searchsorted(vio["biasGyroscopeAdditive"][:, 0], tVio0)
+            biasGyroscope = vio["biasGyroscopeAdditive"][biasGyroscopeInd, 1:]
+            biasAccelerometerInd = np.searchsorted(vio["biasAccelerometerAdditive"][:, 0], tVio0)
+            biasAccelerometer = vio["biasAccelerometerAdditive"][biasAccelerometerInd, 1:]
+            orientationInd = np.searchsorted(vio["orientation"][:, 0], tVio0)
+            orientation = vio["orientation"][orientationInd, 1:]
+            for t, vioToGt in gyroscope.integrate(tVio0, tVio1, gtToWorld0, biasGyroscope, biasAccelerometer, orientation):
+                inertialVioTimes.append(t)
+                inertialVioToGtWorlds.append(vioToGt)
+
         # The first pose matches up to floating point accuracy:
         #   assert(vioToGtWorlds[0] == gtToWorld0)
         # VIO accuracy is measured by comparing the poses at tVio1:
@@ -112,6 +133,8 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
         out = {
             "vioTimes": vioTimes,
             "vioToGtWorlds": vioToGtWorlds,
+            "inertialVioTimes": inertialVioTimes,
+            "inertialVioToGtWorlds": inertialVioToGtWorlds,
             "lastGtToWorld": gtToWorld1,
             "pieceLenSecs": tVio1 - tVio0,
             "trackingQuality": None,
@@ -131,15 +154,9 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     if len(vio["poseTrails"]) == 0: return None, None
     if gt["position"].size == 0 or gt["orientation"].size == 0: return None, None
 
-    gyroscope = None
-    if POSE_TRAIL_GYROSCOPE_INTEGRATION:
-        from .gyroscope_to_orientation import GyroscopeToOrientation
-        gyroscope = GyroscopeToOrientation(info["dir"])
-
-    warned = False
     err = []
     segments = []
-    for segment in generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
+    for segment in generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
         err.append(d)
         # First vioToGtWorld is the same as first gt-to-world because of the alignment.
@@ -154,16 +171,6 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
             "time": segment["vioTimes"][-1],
             "trackingQuality": segment["trackingQuality"],
         })
-        if gyroscope:
-            if len(vio["biasGyroscopeAdditive"]) == 0:
-                if not warned: print("Missing IMU bias estimates from VIO. Add `outputJsonExtras: True` to `vio_config.yaml`.")
-                warned = True
-                continue
-            biasInd = np.searchsorted(vio["biasGyroscopeAdditive"][:, 0], segment["vioTimes"][0])
-            bias = vio["biasGyroscopeAdditive"][biasInd, 1:]
-            imuVioToGtWorld1 = gyroscope.integrate(
-                segment["vioTimes"][0], segment["vioTimes"][-1], segment["vioToGtWorlds"][0], bias)
-            segments[-1]["gyroscopeOrientationErrorDegrees"] = poseOrientationDiffDegrees(imuVioToGtWorld1, segment["lastGtToWorld"])
 
     if len(err) == 0: return None, None
     rmse = np.sqrt(np.mean(np.array(err) ** 2))

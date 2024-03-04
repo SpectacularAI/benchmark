@@ -5,6 +5,8 @@ import numpy as np
 import scipy
 from scipy.spatial.transform import Rotation
 
+YIELD_INTERVAL_SECONDS = 0.005
+
 def readJsonl(filePath):
     with open(filePath) as f:
         for l in f: yield(json.loads(l))
@@ -14,48 +16,74 @@ def readJson(filePath):
         return json.load(f)
 
 class GyroscopeToOrientation:
-    g = []
+    data = []
+    velocityData = []
     imuToOutput = np.eye(4)
 
-    def __init__(self, datasetPath):
-        g = []
+    def __init__(self, datasetPath, vioVelocity):
+        if vioVelocity.shape[0] == 0:
+            raise Exception("No velocity data")
+        self.velocityData = vioVelocity
+
+        # This is not the best acc-gyro syncing method but reasonably good.
+        aLast = None
         t = None
         for obj in readJsonl(pathlib.Path(datasetPath) / "data.jsonl"):
             if not "sensor" in obj: continue
-            if obj["sensor"]["type"] != "gyroscope": continue
             v = obj["sensor"]["values"]
-            # Must be sorted.
-            if t is not None and obj["time"] <= t: continue
+            if t is not None and obj["time"] <= t: continue # Must be sorted.
             t = obj["time"]
-            g.append([t, v[0], v[1], v[2]])
-        self.g = np.array(g)
+            if obj["sensor"]["type"] == "accelerometer": aLast = [v[0], v[1], v[2]]
+            elif obj["sensor"]["type"] == "gyroscope" and aLast is not None:
+                self.data.append([t, v[0], v[1], v[2], aLast[0], aLast[1], aLast[2]])
+        self.data = np.array(self.data)
 
         calibration = readJson(pathlib.Path(datasetPath) / "calibration.json")
         if "imuToOutput" in calibration:
             self.imuToOutput = np.array(calibration["imuToOutput"])
 
-    def integrate(self, t0, t1, outputToWorld0, bias):
-        """Integrate gyroscope samples between t0 and t1 into outputToWorld matrix and return the result matrix"""
-        ind = np.searchsorted(self.g[:, 0], t0)
-        if ind == 0:
-            print("integrate() failed")
-            return outputToWorld0
-        assert(self.g[ind - 1, 0] <= t0)
-        assert(t0 <= self.g[ind, 0])
+    def computePose(self, t, p, q):
+        imuToWorld = np.eye(4)
+        imuToWorld[:3, 3] = p
+        imuToWorld[:3, :3] = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_matrix().transpose()
+        outputToWorld = imuToWorld @ np.linalg.inv(self.imuToOutput)
+        return t, outputToWorld
+
+    def integrate(self, t0, t1, outputToWorld0, biasGyroscope, biasAccelerometer, vioOrientation):
+        ind = np.searchsorted(self.data[:, 0], t0)
+        if ind == 0: return outputToWorld0
+        assert(self.data[ind - 1, 0] <= t0)
+        assert(t0 <= self.data[ind, 0])
         ind += 1
 
-        worldToImu0 = np.linalg.inv(outputToWorld0 @ self.imuToOutput)
+        vioToWorld0 = Rotation.from_quat(vioOrientation).as_matrix()
+        vioWorldToOutputWorld = outputToWorld0[:3, :3] @ np.linalg.inv(vioToWorld0)
 
-        xyzw = Rotation.from_matrix(worldToImu0[:3, :3]).as_quat()
+        velocityInd = np.searchsorted(self.velocityData[:, 0], t0)
+        vioVelocity = self.velocityData[velocityInd, 1:]
+        velocity = vioWorldToOutputWorld @ vioVelocity
+
+        imuToWorld0 = outputToWorld0 @ self.imuToOutput
+
+        p = imuToWorld0[:3, 3]
+        xyzw = Rotation.from_matrix(imuToWorld0[:3, :3].transpose()).as_quat()
         q = np.array([xyzw[3], xyzw[0], xyzw[1], xyzw[2]]) # Convert to wxyz.
         t = t0
-        bias = np.array(bias)
-        while t < t1 and ind < self.g.shape[0]:
-            tCur = self.g[ind, 0]
+        nextYieldT = t
+
+        biasGyroscope = np.array(biasGyroscope)
+        biasAccelerometer = np.array(biasAccelerometer)
+        gravity = np.array([0, 0, -9.81])
+        while t < t1 and ind < self.data.shape[0]:
+            if t >= nextYieldT:
+                nextYieldT = t + YIELD_INTERVAL_SECONDS
+                yield self.computePose(t, p, q)
+
+            tCur = self.data[ind, 0]
             if tCur > t1: tCur = t1
             dt = tCur - t
             assert(dt >= 0)
-            w = self.g[ind, 1:] - bias
+            w = self.data[ind, 1:4] - biasGyroscope
             S = -dt * 0.5 * np.array([
                 [0, -w[0], -w[1], -w[2]],
                 [w[0], 0, -w[2], w[1]],
@@ -65,11 +93,12 @@ class GyroscopeToOrientation:
             A = scipy.linalg.expm(S)
             q = A @ q
             q = q / np.linalg.norm(q)
+            p += velocity * dt # Intentionally before computation of `velocity` this iteration.
+            R = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_matrix()
+            acceleration = R.transpose() @ (self.data[ind, 4:] - biasAccelerometer) + gravity
+            velocity += acceleration * dt
             t = tCur
             ind += 1
 
-        worldToImu1 = np.eye(4)
-        worldToImu1[:3, :3] = Rotation.from_quat([q[1], q[2], q[3], q[0]]).as_matrix()
-        outputToWorld1 = np.linalg.inv(self.imuToOutput @ worldToImu1)
-        return outputToWorld1
-
+        # Return also the final pose as it may be used for metrics.
+        yield self.computePose(t, p, q)
