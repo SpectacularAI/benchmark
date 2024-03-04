@@ -3,6 +3,9 @@ import numpy as np
 # Augment pose trail metrics with orientation estimates from integrating gyroscope measurements.
 POSE_TRAIL_GYROSCOPE_INTEGRATION = True
 
+# For the pose trail pose data, use the whole VIO trajectory (sanity check that the pose trails are more accurate).
+USE_WHOLE_TRACK = False
+
 # Generate slightly overlapping pose trail segments of length `pieceLenSecs`, over the timespan of `gt`.
 # The segments are cut from the current end of the pose trail. The segment is aligned by matching
 # the pose of the older end to the `gt` pose at the same timestamp (interpolated).
@@ -53,38 +56,53 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt):
 
         tVio0 = poseTrail[poseInd0, 0]
         tVio1 = poseTrail[poseInd1, 0]
-
         assert(poseTrail[poseInd0, 0] <= t0)
         t0 = poseTrail[poseInd1, 0]
         # Tail of the pose trail segment is the same as in the previous one.
         if tVio0 == t00: continue
-
         t00 = poseTrail[poseInd0, 0]
-
         # Too long segment.
         if tVio1 - tVio0 > 3.0 * pieceLenSecs:
             if poseTrailInd + 1 < len(poseTrails):
                 t0 = poseTrails[poseTrailInd + 1][0, 0]
             continue
-
         if tVio1 > gt["position"][-1, 0]: break
-        gtToWorld0 = interpolateGtPose(tVio0)
-        gtToWorld1 = interpolateGtPose(tVio1)
 
         vioToWorld0 = np.identity(4)
-        vioToWorld0[:3, 3] = poseTrail[poseInd0, 1:4]
-        vioToWorld0[:3, :3] = Rotation.from_quat(poseTrail[poseInd0, 4:8]).as_matrix()
+        if USE_WHOLE_TRACK:
+            assert(vio["position"].shape[0] == vio["orientation"].shape[0] and vio["position"].shape[0] > 0)
+            wholeInd0 = np.searchsorted(vio["position"][:, 0], tVio0)
+            wholeInd1 = np.searchsorted(vio["position"][:, 0], tVio1)
+            tVio0 = vio["position"][wholeInd0, 0]
+            tVio1 = vio["position"][wholeInd1, 0]
+            vioToWorld0[:3, 3] = vio["position"][wholeInd0, 1:4]
+            vioToWorld0[:3, :3] = Rotation.from_quat(vio["orientation"][wholeInd0, 1:5]).as_matrix()
+        else:
+            vioToWorld0[:3, 3] = poseTrail[poseInd0, 1:4]
+            vioToWorld0[:3, :3] = Rotation.from_quat(poseTrail[poseInd0, 4:8]).as_matrix()
+
+        gtToWorld0 = interpolateGtPose(tVio0)
+        gtToWorld1 = interpolateGtPose(tVio1)
 
         # Compute and apply world transformation at poseInd0 that takes VIO poses to ground truth world.
         vioWorldToGtWorld = gtToWorld0 @ np.linalg.inv(vioToWorld0)
         vioToGtWorlds = []
         vioTimes = []
-        for i in range(poseInd0, poseCount):
-            vioTimes.append(poseTrail[i, 0])
-            vioToWorld = np.identity(4)
-            vioToWorld[:3, 3] = poseTrail[i, 1:4]
-            vioToWorld[:3, :3] = Rotation.from_quat(poseTrail[i, 4:8]).as_matrix()
-            vioToGtWorlds.append(vioWorldToGtWorld @ vioToWorld)
+        if USE_WHOLE_TRACK:
+            for i in range(wholeInd0, wholeInd1 + 1):
+                vioTimes.append(vio["position"][i][0])
+                vioToWorld = np.identity(4)
+                vioToWorld[:3, 3] = vio["position"][i][1:4]
+                vioToWorld[:3, :3] = Rotation.from_quat(vio["orientation"][i, 1:5]).as_matrix()
+                vioToGtWorlds.append(vioWorldToGtWorld @ vioToWorld)
+        else:
+            for i in range(poseInd0, poseCount):
+                vioTimes.append(poseTrail[i, 0])
+                vioToWorld = np.identity(4)
+                vioToWorld[:3, 3] = poseTrail[i, 1:4]
+                vioToWorld[:3, :3] = Rotation.from_quat(poseTrail[i, 4:8]).as_matrix()
+                vioToGtWorlds.append(vioWorldToGtWorld @ vioToWorld)
+
         # The first pose matches up to floating point accuracy:
         #   assert(vioToGtWorlds[0] == gtToWorld0)
         # VIO accuracy is measured by comparing the poses at tVio1:
