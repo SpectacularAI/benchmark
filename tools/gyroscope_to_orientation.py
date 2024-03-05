@@ -31,7 +31,7 @@ class GyroscopeToOrientation:
         for obj in readJsonl(pathlib.Path(datasetPath) / "data.jsonl"):
             if not "sensor" in obj: continue
             v = obj["sensor"]["values"]
-            if t is not None and obj["time"] <= t: continue # Must be sorted.
+            if t is not None and obj["time"] < t: continue # Must be sorted.
             t = obj["time"]
             if obj["sensor"]["type"] == "accelerometer": aLast = [v[0], v[1], v[2]]
             elif obj["sensor"]["type"] == "gyroscope" and aLast is not None:

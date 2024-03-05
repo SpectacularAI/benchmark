@@ -141,6 +141,7 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
         }
         if len(vio["trackingQuality"]) > 0:
             qualityInd = np.searchsorted(vio["trackingQuality"][:, 0], tVio1)
+            qualityInd = min(qualityInd, len(vio["trackingQuality"]) - 1)
             out["trackingQuality"] = vio["trackingQuality"][qualityInd, 1]
         yield out
 
