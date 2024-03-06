@@ -16,20 +16,13 @@ def readJson(filePath):
         return json.load(f)
 
 class GyroscopeToOrientation:
-    data = []
-    velocity = []
-    angularVelocity = []
-    bga = []
-    baa = []
-    orientation = []
-    imuToOutput = np.eye(4)
-
     def __init__(self, datasetPath, vio):
         self.velocity = vio["velocity"]
         self.angularVelocity = vio["angularVelocity"]
         self.bga = vio["biasGyroscopeAdditive"]
         self.baa = vio["biasAccelerometerAdditive"]
         self.orientation = vio["orientation"]
+        self.data = []
 
         # This is not the best acc-gyro syncing method but reasonably good.
         aLast = None
@@ -47,6 +40,8 @@ class GyroscopeToOrientation:
         calibration = readJson(pathlib.Path(datasetPath) / "calibration.json")
         if "imuToOutput" in calibration:
             self.imuToOutput = np.array(calibration["imuToOutput"])
+        else:
+            self.imuToOutput = np.eye(4)
 
     def computePose(self, t, p, q):
         imuToWorld = np.eye(4)
