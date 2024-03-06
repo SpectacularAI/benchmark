@@ -17,13 +17,19 @@ def readJson(filePath):
 
 class GyroscopeToOrientation:
     data = []
-    velocityData = []
+    velocity = []
+    angularVelocity = []
+    bga = []
+    baa = []
+    orientation = []
     imuToOutput = np.eye(4)
 
-    def __init__(self, datasetPath, vioVelocity):
-        if vioVelocity.shape[0] == 0:
-            raise Exception("No velocity data")
-        self.velocityData = vioVelocity
+    def __init__(self, datasetPath, vio):
+        self.velocity = vio["velocity"]
+        self.angularVelocity = vio["angularVelocity"]
+        self.bga = vio["biasGyroscopeAdditive"]
+        self.baa = vio["biasAccelerometerAdditive"]
+        self.orientation = vio["orientation"]
 
         # This is not the best acc-gyro syncing method but reasonably good.
         aLast = None
@@ -49,19 +55,33 @@ class GyroscopeToOrientation:
         outputToWorld = imuToWorld @ np.linalg.inv(self.imuToOutput)
         return t, outputToWorld
 
-    def integrate(self, t0, t1, outputToWorld0, biasGyroscope, biasAccelerometer, vioOrientation):
+    def integrate(self, t0, t1, outputToWorld0):
         ind = np.searchsorted(self.data[:, 0], t0)
         if ind == 0: return outputToWorld0
         assert(self.data[ind - 1, 0] <= t0)
         assert(t0 <= self.data[ind, 0])
         ind += 1
 
+        biasGyroscopeInd = np.searchsorted(self.bga[:, 0], t0)
+        biasGyroscope = self.bga[biasGyroscopeInd, 1:]
+        biasAccelerometerInd = np.searchsorted(self.baa[:, 0], t0)
+        biasAccelerometer = self.baa[biasAccelerometerInd, 1:]
+        orientationInd = np.searchsorted(self.orientation[:, 0], t0)
+        vioOrientation = self.orientation[orientationInd, 1:]
+        angularVelocityInd = np.searchsorted(self.angularVelocity[:, 0], t0)
+        angularVelocity = self.angularVelocity[angularVelocityInd, 1:]
+
         vioToWorld0 = Rotation.from_quat(vioOrientation).as_matrix()
         vioWorldToOutputWorld = outputToWorld0[:3, :3] @ np.linalg.inv(vioToWorld0)
+        velocityInd = np.searchsorted(self.velocity[:, 0], t0)
+        vioVelocity = self.velocity[velocityInd, 1:]
 
-        velocityInd = np.searchsorted(self.velocityData[:, 0], t0)
-        vioVelocity = self.velocityData[velocityInd, 1:]
+        x = self.imuToOutput[:3, 3] # A vector from Output position to IMU position, in output coordinates.
+        x = outputToWorld0[:3, :3] @ x # The same vector in world coordinates.
+        tangentialVelocity = np.cross(angularVelocity, x)
+
         velocity = vioWorldToOutputWorld @ vioVelocity
+        velocity += tangentialVelocity
 
         imuToWorld0 = outputToWorld0 @ self.imuToOutput
 

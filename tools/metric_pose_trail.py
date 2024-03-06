@@ -19,7 +19,7 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
             print("Missing IMU bias estimates from VIO. Add `outputJsonExtras: True` to `vio_config.yaml`.")
         else:
             from .gyroscope_to_orientation import GyroscopeToOrientation
-            gyroscope = GyroscopeToOrientation(info["dir"], vio["velocity"])
+            gyroscope = GyroscopeToOrientation(info["dir"], vio)
 
     qGt = Rotation.from_quat(gt["orientation"][:, 1:])
     slerp = Slerp(gt["orientation"][:, 0], qGt)
@@ -114,13 +114,7 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
         inertialVioToGtWorlds = []
         inertialVioTimes = []
         if gyroscope:
-            biasGyroscopeInd = np.searchsorted(vio["biasGyroscopeAdditive"][:, 0], tVio0)
-            biasGyroscope = vio["biasGyroscopeAdditive"][biasGyroscopeInd, 1:]
-            biasAccelerometerInd = np.searchsorted(vio["biasAccelerometerAdditive"][:, 0], tVio0)
-            biasAccelerometer = vio["biasAccelerometerAdditive"][biasAccelerometerInd, 1:]
-            orientationInd = np.searchsorted(vio["orientation"][:, 0], tVio0)
-            orientation = vio["orientation"][orientationInd, 1:]
-            for t, vioToGt in gyroscope.integrate(tVio0, tVio1, gtToWorld0, biasGyroscope, biasAccelerometer, orientation):
+            for t, vioToGt in gyroscope.integrate(tVio0, tVio1, gtToWorld0):
                 inertialVioTimes.append(t)
                 inertialVioToGtWorlds.append(vioToGt)
 
