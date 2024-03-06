@@ -55,6 +55,7 @@ class GyroscopeToOrientation:
         outputToWorld = imuToWorld @ np.linalg.inv(self.imuToOutput)
         return t, outputToWorld
 
+    # Integrate on interval [t0, t1] starting from the given output-to-gt-world pose.
     def integrate(self, t0, t1, outputToWorld0):
         ind = np.searchsorted(self.data[:, 0], t0)
         if ind == 0: return outputToWorld0
@@ -62,6 +63,8 @@ class GyroscopeToOrientation:
         assert(t0 <= self.data[ind, 0])
         ind += 1
 
+        # To initialize the integration we need from VIO the linear and angular velocities.
+        # To to the integration we need estimates for the accelerometer and gyroscope biases.
         biasGyroscopeInd = np.searchsorted(self.bga[:, 0], t0)
         biasGyroscope = self.bga[biasGyroscopeInd, 1:]
         biasAccelerometerInd = np.searchsorted(self.baa[:, 0], t0)
@@ -72,16 +75,18 @@ class GyroscopeToOrientation:
         angularVelocity = self.angularVelocity[angularVelocityInd, 1:]
 
         vioToWorld0 = Rotation.from_quat(vioOrientation).as_matrix()
-        vioWorldToOutputWorld = outputToWorld0[:3, :3] @ np.linalg.inv(vioToWorld0)
         velocityInd = np.searchsorted(self.velocity[:, 0], t0)
         vioVelocity = self.velocity[velocityInd, 1:]
 
+        # Handle the linear velocity difference of output and IMU coordinate systems due to angular velocity.
         x = self.imuToOutput[:3, 3] # A vector from Output position to IMU position, in output coordinates.
-        x = outputToWorld0[:3, :3] @ x # The same vector in world coordinates.
+        x = vioToWorld0[:3, :3] @ x # The same vector in world coordinates.
         tangentialVelocity = np.cross(angularVelocity, x)
+        imuVelocity = vioVelocity + tangentialVelocity
 
-        velocity = vioWorldToOutputWorld @ vioVelocity
-        velocity += tangentialVelocity
+        # Transform from IMU-to-vio-world to IMU-to-gt-world.
+        vioWorldToOutputWorld = outputToWorld0[:3, :3] @ np.linalg.inv(vioToWorld0)
+        velocity = vioWorldToOutputWorld @ imuVelocity
 
         imuToWorld0 = outputToWorld0 @ self.imuToOutput
 
@@ -91,6 +96,8 @@ class GyroscopeToOrientation:
         t = t0
         nextYieldT = t
 
+        # Integrate pose of IMU in the gt world coordinates.
+        # computePose() yields output-to-world poses.
         biasGyroscope = np.array(biasGyroscope)
         biasAccelerometer = np.array(biasAccelerometer)
         gravity = np.array([0, 0, -9.81])
