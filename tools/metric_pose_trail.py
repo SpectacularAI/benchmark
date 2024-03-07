@@ -153,14 +153,18 @@ def computePoseTrailMetric(vio, gt, pieceLenSecs, info):
     segments = []
     for segment in generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
         d = np.linalg.norm(segment["vioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
+        dInertial = np.linalg.norm(segment["inertialVioToGtWorlds"][-1][:3, 3] - segment["lastGtToWorld"][:3, 3])
         err.append(d)
         # First vioToGtWorld is the same as first gt-to-world because of the alignment.
         gtDistance = np.linalg.norm(segment["vioToGtWorlds"][0][:3, 3] - segment["lastGtToWorld"][:3, 3])
         t = segment["pieceLenSecs"]
         speed = gtDistance / t if t > 0 else None
+
         segments.append({
             "positionErrorMeters": d,
             "orientationErrorDegrees": poseOrientationDiffDegrees(segment["vioToGtWorlds"][-1], segment["lastGtToWorld"]),
+            "inertialPositionErrorMeters": dInertial,
+            "inertialOrientationErrorDegrees": poseOrientationDiffDegrees(segment["inertialVioToGtWorlds"][-1], segment["lastGtToWorld"]),
             "pieceLengthSeconds": t,
             "speed": speed,
             "time": segment["vioTimes"][-1],
