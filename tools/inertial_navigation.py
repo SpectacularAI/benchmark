@@ -15,7 +15,7 @@ def readJson(filePath):
     with open(filePath) as f:
         return json.load(f)
 
-class GyroscopeToOrientation:
+class InertialNavigation:
     def __init__(self, datasetPath, vio):
         self.velocity = vio["velocity"]
         self.angularVelocity = vio["angularVelocity"]

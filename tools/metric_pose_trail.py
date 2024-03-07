@@ -1,7 +1,7 @@
 import numpy as np
 
-# Augment pose trail metrics with orientation estimates from integrating gyroscope measurements.
-POSE_TRAIL_GYROSCOPE_INTEGRATION = True
+# Augment VIO pose trail results with results from inertial-only navigation.
+USE_INERTIAL_NAVIGATION = True
 
 # For the pose trail pose data, use the whole VIO trajectory (sanity check that the pose trails are more accurate).
 USE_WHOLE_TRACK = False
@@ -13,13 +13,13 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
     poseTrails = vio["poseTrails"]
     from scipy.spatial.transform import Rotation, Slerp
 
-    gyroscope = None
-    if POSE_TRAIL_GYROSCOPE_INTEGRATION:
+    inertial = None
+    if USE_INERTIAL_NAVIGATION:
         if len(vio["biasGyroscopeAdditive"]) == 0:
             print("Missing IMU bias estimates from VIO. Add `outputJsonExtras: True` to `vio_config.yaml`.")
         else:
-            from .gyroscope_to_orientation import GyroscopeToOrientation
-            gyroscope = GyroscopeToOrientation(info["dir"], vio)
+            from .inertial_navigation import InertialNavigation
+            inertial = InertialNavigation(info["dir"], vio)
 
     qGt = Rotation.from_quat(gt["orientation"][:, 1:])
     slerp = Slerp(gt["orientation"][:, 0], qGt)
@@ -113,8 +113,8 @@ def generatePoseTrailMetricSegments(vio, pieceLenSecs, gt, info):
 
         inertialVioToGtWorlds = []
         inertialVioTimes = []
-        if gyroscope:
-            for t, vioToGt in gyroscope.integrate(tVio0, tVio1, gtToWorld0):
+        if inertial:
+            for t, vioToGt in inertial.integrate(tVio0, tVio1, gtToWorld0):
                 inertialVioTimes.append(t)
                 inertialVioToGtWorlds.append(vioToGt)
 
