@@ -65,6 +65,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
     velocity = []
     angularVelocity = []
     acceleration = []
+    baa = []
     bga = []
     stat = []
     idToTime = {}
@@ -122,8 +123,10 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
                 poseTrails.append(np.array(poseTrail))
             # Currently needed only for a very niche pose trail metric.
             if "biasMean" in row and getPoseTrails:
-                v = row["biasMean"]["gyroscopeAdditive"]
-                bga.append([t, v["x"], v["y"], v["z"]])
+                a = row["biasMean"]["accelerometerAdditive"]
+                baa.append([t, a["x"], a["y"], a["z"]])
+                g = row["biasMean"]["gyroscopeAdditive"]
+                bga.append([t, g["x"], g["y"], g["z"]])
 
     VIO_OUTPUT_CACHE[key] = {
         'position': np.array(position),
@@ -137,6 +140,7 @@ def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseT
         'trackingQuality': np.array(trackingQuality),
         'poseTrails': poseTrails,
         'biasGyroscopeAdditive': np.array(bga),
+        'biasAccelerometerAdditive': np.array(baa),
         'velocityCovariances': velocityCovariances,
     }
     return VIO_OUTPUT_CACHE[key].copy()

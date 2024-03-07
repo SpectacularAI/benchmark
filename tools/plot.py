@@ -214,7 +214,7 @@ def plotTrackingQuality(vio, axis, metrics):
         err *= 10
         axis.plot(t, err, label="segment position error")
 
-def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
+def plotPoseTrails(args, vio, tracks, axis, ax1, ax2, info):
     if len(tracks) == 0:
         print("Expected ground truth track")
         return
@@ -231,7 +231,7 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
         print("Expected orientation in ground truth")
         return
 
-    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio, 1.0, gt)):
+    for segmentInd, segment in enumerate(generatePoseTrailMetricSegments(vio, 1.0, gt, info)):
         x = []
         y = []
         for vioToGtWorld in segment["vioToGtWorlds"]:
@@ -240,6 +240,14 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2):
             y.append(vioToGtWorld[ax2 - 1, 3])
         label = vio["name"] if segmentInd == 0 else None
         axis.plot(x, y, label=label, color=getColor(vio["name"]), linewidth=1)
+
+        x = []
+        y = []
+        for vioToGtWorld in segment["inertialVioToGtWorlds"]:
+            x.append(vioToGtWorld[ax1 - 1, 3])
+            y.append(vioToGtWorld[ax2 - 1, 3])
+        label = "Inertial-only (using VIO biases and velocity)" if segmentInd == 0 else None
+        axis.plot(x, y, label=label, color="green", linewidth=1)
 
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
@@ -360,7 +368,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             elif metricSet == Metric.TRACKING_QUALITY.value:
                 plotTrackingQuality(vio, plotAxis, metrics)
             elif metricSet == Metric.POSE_TRAIL_3D.value:
-                plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2)
+                plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2, caseInfo)
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
