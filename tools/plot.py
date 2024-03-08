@@ -313,6 +313,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
     figure, subplots = plt.subplots(rows, columns, figsize=figureSize(caseCount))
     subplots = np.ravel(subplots)
+    for i, s in enumerate(subplots):
+        if i >= caseCount: s.axis("off")
 
     getPoseTrails = metricSet in [Metric.POSE_TRAIL_3D.value, Metric.TRACKING_QUALITY.value]
 
