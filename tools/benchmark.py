@@ -324,11 +324,12 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
     duration = time.time() - startTime
     cpuTime = None
     if timeCmd:
-        with open(casePaths["logs"], "r") as f:
-            for line in f:
-                if not line.startswith(CPU_TIME_MESSAGE): continue
-                tokens = line.split()
-                cpuTime = float(tokens[-2]) + float(tokens[-3]) # sys + user
+        if pathlib.Path(casePaths["logs"]).exists():
+            with open(casePaths["logs"], "r") as f:
+                for line in f:
+                    if not line.startswith(CPU_TIME_MESSAGE): continue
+                    tokens = line.split()
+                    cpuTime = float(tokens[-2]) + float(tokens[-3]) # sys + user
 
     if not pathlib.Path(casePaths["output"]).exists():
         print("No output for case", caseName)
