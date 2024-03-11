@@ -374,26 +374,23 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
     print("{:40} {:>6.0f}s   metric: {:>8}".format(caseName, duration, metricStr))
     return vioSuccess
 
-def setupBenchmarkFromSetDescription(args, setName):
-    # Look for the set file in a predefined directory or by path.
-    searchDirs = [args.setDir + "/", os.getcwd(), ""]
-    success = False
-    triedFiles = []
+# Look for the set file in a predefined directory or by path.
+def findSetFile(setDir, setName):
+    searchDirs = [setDir + "/", os.getcwd(), ""]
     for searchDir in searchDirs:
-        try:
-            path = searchDir + setName
-            if not ".json" in path:
-                path += ".json"
-            triedFiles.append(path)
-            setFile = open(path)
-            success = True
-            break
-        except FileNotFoundError:
-            pass
-    if not success:
-        raise Exception("Benchmark set \"{}\" not found in {}".format(setName, searchDirs))
+        path = searchDir + setName
+        if not ".json" in path:
+            path += ".json"
+        path = pathlib.Path(path)
+        if path.exists():
+            return path
+    raise Exception("Benchmark set \"{}\" not found in {}".format(setName, searchDirs))
 
-    setDefinition = json.loads(setFile.read())
+def setupBenchmarkFromSetDescription(args, setName):
+    setPath = findSetFile(args.setDir, setName)
+    with open(setPath) as setFile:
+        setDefinition = json.load(setFile)
+
     benchmarks = []
     parameterSets = [{}]
     if setDefinition.get("parameterSets") != None:
