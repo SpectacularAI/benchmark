@@ -202,7 +202,14 @@ def convertComparisonData(casePaths, metricSets):
         for k in TRACK_KINDS:
             if rowJson.get(k) is not None:
                 kind = k
+                pose = rowJson[kind]
                 break
+        if "pose" in rowJson:
+            for k in TRACK_KINDS:
+                if rowJson["pose"]["name"] == k:
+                    kind = k
+                    pose = rowJson["pose"]
+                    break
         if not kind: return
 
         if not kind in datasets:
@@ -211,14 +218,14 @@ def convertComparisonData(casePaths, metricSets):
         hasOrientation = False
         dToW = np.identity(4) # Device-to-world matrix.
         if kind == "gps":
-            p = gpsConverter.convert(**rowJson["gps"])
+            p = gpsConverter.convert(**pose)
         elif kind == "rtkgps":
             p = rtkgpsConverter.convert(**dataRow["rtkgps"])
         else:
-            p = rowJson[kind]["position"]
-            if needsOrientation and "orientation" in rowJson[kind]:
+            p = pose["position"]
+            if needsOrientation and "orientation" in pose:
                 hasOrientation = True
-                q = [rowJson[kind]["orientation"][c] for c in "xyzw"]
+                q = [pose["orientation"][c] for c in "xyzw"]
                 dToW[0:3, 0:3] = Rotation.from_quat(q).as_matrix()
         dToW[0:3, 3] = [p[c] for c in "xyz"]
 
