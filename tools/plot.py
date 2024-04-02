@@ -265,7 +265,7 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
     for ind, track in enumerate(tracks):
         marker = None
         if not "position" in track: continue
-        if isSparse(track['position']): marker = "o"
+        # if isSparse(track['position']): marker = "o"
         if postprocessed and ind == gtInd: marker = "o"
 
         if track['position'].size == 0: continue

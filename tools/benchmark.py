@@ -220,6 +220,7 @@ def convertComparisonData(casePaths, metricSets):
         if kind == "gps":
             p = gpsConverter.convert(**pose)
         elif kind == "rtkgps":
+            if "rtk_fix" in dataRow["rtkgps"] and dataRow["rtkgps"]["rtk_fix"] < 3: return
             p = rtkgpsConverter.convert(**dataRow["rtkgps"])
         else:
             p = pose["position"]
