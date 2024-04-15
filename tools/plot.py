@@ -328,7 +328,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             caseInfoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
             with open(caseInfoPath) as caseInfoJsonFile:
                 caseInfo = json.loads(caseInfoJsonFile.read())
-            fixOrigin = "fixOrigin" in caseInfo and caseInfo["fixOrigin"]
+            fixOrigin = "fixOrigin" in sharedInfo and sharedInfo["fixOrigin"]
 
             metrics = None
             caseMetricsPath = "{}/metrics/{}.json".format(benchmarkFolder, caseName)

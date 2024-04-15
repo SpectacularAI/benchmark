@@ -13,16 +13,16 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity=None):
+def computeMetricSets(vio, vioPostprocessed, gt, info, sharedInfo, sampleIntervalForVelocity=None):
     pVio = vio["position"]
     pGt = gt["position"]
     if pVio.size > 0 and pGt.size > 0 and (pVio[0, 0] > pGt[-1, 0] or pVio[-1, 0] < pGt[0, 0]):
         print("{}: VIO timestamps do not overlap with ground truth, cannot compute metrics or align."
             .format(info["caseName"]))
 
-    metricSets = info["metricSets"]
-    fixOrigin = "fixOrigin" in info and info["fixOrigin"]
-    poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
+    metricSets = sharedInfo["metricSets"]
+    fixOrigin = "fixOrigin" in sharedInfo and sharedInfo["fixOrigin"]
+    poseTrailLengths = sharedInfo["poseTrailLengths"] if "poseTrailLengths" in sharedInfo else []
 
     metrics = {}
     for metricSetStr in metricSets:
@@ -146,6 +146,8 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
+    with open(benchmarkFolder + "/info.json") as sharedInfoJsonFile:
+        sharedInfo = json.loads(sharedInfoJsonFile.read())
 
     datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
     gt = datasets[0] if datasets else None
@@ -154,7 +156,7 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
     vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, postprocessed=True, getPoseTrails=True)
 
     if gt:
-        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity)
+        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info, sharedInfo, sampleIntervalForVelocity)
         if baseline:
             relative = computeRelativeMetrics(metricsJson, baseline)
             metricsJson["relative"] = relative

@@ -109,11 +109,15 @@ def computeVideoTimeSpan(dataJsonlPath):
 
 def writeSharedInfoFile(args, dirs):
     infoJsonPath = dirs.results + "/info.json"
+    metricSets = args.metricSet.split(",")
     info = {
         "outputDirectory": dirs.results,
         "parameters": args.params,
         "methodName": args.methodName,
         "parameters": args.params,
+        "fixOrigin": args.fixOrigin,
+        "metricSets": metricSets,
+        "poseTrailLengths": [float(s) for s in args.poseTrailLengths.split(",")],
     }
 
     def runAndCapture(cmd):
@@ -188,7 +192,6 @@ WORLD_TRANSFORM = {
         [0, 1, 0, 0],
         [0, 0, 0, 1],
     ]),
-    # TODO Missing realsense.
 }
 
 def convertComparisonData(casePaths, metricSets):
@@ -361,13 +364,9 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "caseName": caseName,
             "dir": benchmark.dir,
             "paramSet": benchmark.paramSet,
-            "methodName": args.methodName,
             "duration": duration,
             "frameCount": frameCount,
-            "metricSets": metricSets,
-            "fixOrigin": args.fixOrigin,
             "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
-            "poseTrailLengths": [float(s) for s in args.poseTrailLengths.split(",")],
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
         if benchmark.iteration: infoJson["iteration"] = benchmark.iteration
@@ -542,7 +541,6 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         with open(args.baseline) as baselineFile:
             baselineMetrics = json.loads(baselineFile.read())
 
-    # TODO Is this class useless?
     dirs = Dirs()
     dirs.results = results
     dirs.groundTruth = withMkdir(results + "/ground-truth")
