@@ -67,6 +67,9 @@ def getArgParser():
     parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
     return parser
 
+def readJson(filePath):
+    with open(filePath) as f:
+        return json.load(f)
 
 class Benchmark:
     dir = None
@@ -104,20 +107,18 @@ def computeVideoTimeSpan(dataJsonlPath):
     if span[1] < span[0]: return None
     return span
 
-def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
-    def runAndCapture(cmd):
-        return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
-
+def writeSharedInfoFile(args, dirs):
+    infoJsonPath = dirs.results + "/info.json"
     info = {
         "outputDirectory": dirs.results,
-        "startTime": startTime,
-        "endTime": endTime,
-        "metrics": aggregateMetrics,
+        "parameters": args.params,
+        "methodName": args.methodName,
         "parameters": args.params,
     }
 
-    info["methodName"] = args.methodName
-    info["parameters"] = args.params
+    def runAndCapture(cmd):
+        return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
+
     mainBinary = dirs.results + "/main"
     if os.path.isfile(mainBinary) and runAndCapture("command -v shasum"):
         info["fingerprint"] = runAndCapture("shasum -a 256 " + mainBinary)
@@ -145,11 +146,20 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
             subprocess.run("git diff --staged > \"{}/git_diff_staged.txt\"".format(dirs.results), shell=True)
         os.chdir(originalDir)
 
-    infoJsonPath = dirs.results + "/info.json"
     with open(infoJsonPath, "w") as f:
         f.write(json.dumps(info, indent=4, separators=(',', ': ')))
 
-    return infoJsonPath
+def appendSharedInfoFileWithResults(args, dirs, startTime, endTime, aggregateMetrics):
+    infoJsonPath = dirs.results + "/info.json"
+    with open(infoJsonPath) as f:
+        info = readJson(infoJsonPath)
+
+    info["startTime"] = startTime
+    info["endTime"] = endTime
+    info["metrics"] = aggregateMetrics
+
+    with open(infoJsonPath, "w") as f:
+        f.write(json.dumps(info, indent=4, separators=(',', ': ')))
 
 # Maps from JSONL format keys to names shown in the output data and plots.
 TRACK_KINDS = {
@@ -542,6 +552,8 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     dirs.info = withMkdir(results + "/info")
     dirs.metrics = withMkdir(results + "/metrics")
 
+    writeSharedInfoFile(args, dirs) # Needed by metrics computations.
+
     if setupFn:
         setupFn(args, dirs.results)
 
@@ -615,8 +627,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     with open(metricsJsonPath, "w") as f:
         f.write(json.dumps(metrics, indent=4, separators=(',', ': ')))
 
-    # Needed by plotting below.
-    infoJsonPath = writeSharedInfoFile(args, dirs, startTime, endTime, ametrics)
+    appendSharedInfoFileWithResults(args, dirs, startTime, endTime, ametrics)
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
