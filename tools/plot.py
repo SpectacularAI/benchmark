@@ -293,12 +293,16 @@ def plotResets(track, axis, ax1, ax2):
         pr = [np.interp(reset, p[:, 0], p[:, i]) for i in range(4)]
         axis.plot(pr[ax1], pr[ax2], color="cyan", marker="o", markersize=8, label=label)
 
-def figureSize(num_plots):
-    if num_plots < 10:
-        return (15,15)
-    if num_plots < 20:
-        return (20,20)
-    return (30,30)
+# Returns inches. Multiplying with the `dpi=100` argument of `savefig()` gives the saved image resolution.
+def figureSize(rows, columns, square):
+    if square:
+        numPlots = rows * columns
+        if numPlots <= 16: return (15, 15)
+        if numPlots <= 25: return (20, 20)
+        return (30, 30)
+    if columns == 1 and rows == 1: return (12, 12)
+    elif columns <= 2 and rows <= 2: return (8 * columns, 8 * rows)
+    return (4 * columns, 4 * rows)
 
 def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     if not args.showPlot:
@@ -307,11 +311,21 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     import matplotlib.pyplot as plt
 
     caseCount = len(caseNames)
-    columns = int(math.sqrt(caseCount))
-    if pow(columns, 2) < caseCount: columns += 1
-    rows = columns
+    if caseCount == 0: return
 
-    figure, subplots = plt.subplots(rows, columns, figsize=figureSize(caseCount))
+    # The plot images are typically viewed on landscape monitors, so if the subplots array
+    # is shaped accordingly, individual subplots will be larger than with a square image.
+    SQUARE_IMAGE = False
+    if SQUARE_IMAGE:
+        columns = int(math.sqrt(caseCount))
+        if pow(columns, 2) < caseCount: columns += 1
+        rows = columns
+    else:
+        columns = int(1.5 * math.sqrt(caseCount))
+        rows = 1
+        while rows * columns < caseCount: rows += 1
+
+    figure, subplots = plt.subplots(rows, columns, figsize=figureSize(rows, columns, SQUARE_IMAGE))
     subplots = np.ravel(subplots)
     for i, s in enumerate(subplots):
         if i >= caseCount: s.axis("off")
