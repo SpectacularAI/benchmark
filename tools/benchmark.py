@@ -14,7 +14,7 @@ import concurrent.futures
 from functools import partial
 import multiprocessing
 
-from .utils import GpsToLocalConverter
+from .gnss import GnssConverter
 from .compute_metrics import computeMetrics, Metric
 from .plot import makeAllPlots, getFigurePath
 
@@ -182,8 +182,7 @@ WORLD_TRANSFORM = {
 }
 
 def convertComparisonData(casePaths, metricSets):
-    gpsConverter = GpsToLocalConverter()
-    rtkgpsConverter = GpsToLocalConverter()
+    gnssConverter = GnssConverter()
     frameCount = 0
     datasets = {}
 
@@ -217,10 +216,8 @@ def convertComparisonData(casePaths, metricSets):
 
         hasOrientation = False
         dToW = np.identity(4) # Device-to-world matrix.
-        if kind == "gps":
-            p = gpsConverter.convert(**pose)
-        elif kind == "rtkgps":
-            p = rtkgpsConverter.convert(**dataRow["rtkgps"])
+        if "latitude" in pose:
+            p = gnssConverter.enu(pose["latitude"], pose["longitude"], pose["altitude"])
         else:
             p = pose["position"]
             if needsOrientation and "orientation" in pose:
