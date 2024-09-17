@@ -14,7 +14,7 @@ import concurrent.futures
 from functools import partial
 import multiprocessing
 
-from .utils import GpsToLocalConverter
+from .gnss import GnssConverter
 from .compute_metrics import computeMetrics, Metric
 from .plot import makeAllPlots, getFigurePath
 
@@ -164,26 +164,8 @@ TRACK_KINDS = {
     "externalPose": "externalPose",
 }
 
-DEVICE_TRANSFORM = {}
-WORLD_TRANSFORM = {
-    "arcore": np.array([
-        [1, 0, 0, 0],
-        [0, 0, -1, 0],
-        [0, 1, 0, 0],
-        [0, 0, 0, 1],
-    ]),
-    "arengine": np.array([
-        [1, 0, 0, 0],
-        [0, 0, -1, 0],
-        [0, 1, 0, 0],
-        [0, 0, 0, 1],
-    ]),
-    # TODO Missing realsense.
-}
-
 def convertComparisonData(casePaths, metricSets):
-    gpsConverter = GpsToLocalConverter()
-    rtkgpsConverter = GpsToLocalConverter()
+    gnssConverter = GnssConverter()
     frameCount = 0
     datasets = {}
 
@@ -217,10 +199,8 @@ def convertComparisonData(casePaths, metricSets):
 
         hasOrientation = False
         dToW = np.identity(4) # Device-to-world matrix.
-        if kind == "gps":
-            p = gpsConverter.convert(**pose)
-        elif kind == "rtkgps":
-            p = rtkgpsConverter.convert(**dataRow["rtkgps"])
+        if "latitude" in pose:
+            p = gnssConverter.enu(pose["latitude"], pose["longitude"], pose["altitude"])
         else:
             p = pose["position"]
             if needsOrientation and "orientation" in pose:
@@ -228,11 +208,6 @@ def convertComparisonData(casePaths, metricSets):
                 q = [pose["orientation"][c] for c in "xyzw"]
                 dToW[0:3, 0:3] = Rotation.from_quat(q).as_matrix()
         dToW[0:3, 3] = [p[c] for c in "xyz"]
-
-        if kind in DEVICE_TRANSFORM:
-            dToW = dToW.dot(DEVICE_TRANSFORM[kind])
-        if kind in WORLD_TRANSFORM:
-            dToW = WORLD_TRANSFORM[kind].dot(dToW)
 
         json = {
             "time": rowJson["time"],
@@ -285,8 +260,6 @@ def convertComparisonData(casePaths, metricSets):
             "groundTruth",
             "externalPose",
             "ARKit",
-            "arcore",
-            "arengine",
             "output",
             "realsense",
             "gps",
