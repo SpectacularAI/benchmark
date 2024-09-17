@@ -164,23 +164,6 @@ TRACK_KINDS = {
     "externalPose": "externalPose",
 }
 
-DEVICE_TRANSFORM = {}
-WORLD_TRANSFORM = {
-    "arcore": np.array([
-        [1, 0, 0, 0],
-        [0, 0, -1, 0],
-        [0, 1, 0, 0],
-        [0, 0, 0, 1],
-    ]),
-    "arengine": np.array([
-        [1, 0, 0, 0],
-        [0, 0, -1, 0],
-        [0, 1, 0, 0],
-        [0, 0, 0, 1],
-    ]),
-    # TODO Missing realsense.
-}
-
 def convertComparisonData(casePaths, metricSets):
     gnssConverter = GnssConverter()
     frameCount = 0
@@ -225,11 +208,6 @@ def convertComparisonData(casePaths, metricSets):
                 q = [pose["orientation"][c] for c in "xyzw"]
                 dToW[0:3, 0:3] = Rotation.from_quat(q).as_matrix()
         dToW[0:3, 3] = [p[c] for c in "xyz"]
-
-        if kind in DEVICE_TRANSFORM:
-            dToW = dToW.dot(DEVICE_TRANSFORM[kind])
-        if kind in WORLD_TRANSFORM:
-            dToW = WORLD_TRANSFORM[kind].dot(dToW)
 
         json = {
             "time": rowJson["time"],
@@ -282,8 +260,6 @@ def convertComparisonData(casePaths, metricSets):
             "groundTruth",
             "externalPose",
             "ARKit",
-            "arcore",
-            "arengine",
             "output",
             "realsense",
             "gps",
