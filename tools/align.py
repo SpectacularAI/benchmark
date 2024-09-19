@@ -2,7 +2,7 @@ import numpy as np
 
 # If number of ground truth measurements per second is lower than this,
 # treat the ground truth as sparse (use all points).
-SPARSITY_THRESHOLD = 1.0
+SPARSITY_THRESHOLD = 0.2
 
 def isSparse(out):
     n = out.shape[0]
