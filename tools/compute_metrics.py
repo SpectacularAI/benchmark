@@ -13,7 +13,10 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity=None):
+def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
+    if not VioTrackKind.REALTIME in vioAll:
+        return {}
+    vio = vioAll[VioTrackKind.REALTIME]
     pVio = vio["position"]
     pGt = gt["position"]
     if pVio.size > 0 and pGt.size > 0 and (pVio[0, 0] > pGt[-1, 0] or pVio[-1, 0] < pGt[0, 0]):
@@ -62,16 +65,18 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
         elif metricSet == Metric.ANGULAR_VELOCITY:
             metrics[metricSetStr] = computeAngularVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.POSTPROCESSED:
-            if vioPostprocessed:
-                # Note that compared to the other metrics, the order of arguments is swapped
-                # so that the (sparse) time grid of postprocessed VIO is used.
-                alignedGt, _ = align(pGt, vioPostprocessed["position"], -1,
-                    fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
-                alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
-                if alignedGt.size > 0 and unalignedVio.size > 0:
-                    metrics[metricSetStr] = rmse(alignedGt, unalignedVio)
-                else:
-                    metrics[metricSetStr] = None
+            if not VioTrackKind.POSTPROCESSED in vioAll: continue
+            vioPostprocessed = vioAll[VioTrackKind.POSTPROCESSED]
+            if not "position" in vioPostprocessed: continue
+            # Note that compared to the other metrics, the order of arguments is swapped
+            # so that the (sparse) time grid of postprocessed VIO is used.
+            alignedGt, _ = align(pGt, vioPostprocessed["position"], -1,
+                fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
+            alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
+            if alignedGt.size > 0 and unalignedVio.size > 0:
+                metrics[metricSetStr] = rmse(alignedGt, unalignedVio)
+            else:
+                metrics[metricSetStr] = None
         elif metricSet == Metric.CPU_TIME:
             metrics[metricSetStr] = None
             if "cpuTime" in info: metrics[metricSetStr] = info["cpuTime"]
@@ -85,6 +90,18 @@ def computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity
             metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
         elif metricSet == Metric.TRACKING_QUALITY:
             metrics[metricSetStr] = None # TODO
+        elif metricSet == Metric.GLOBAL:
+            if not VioTrackKind.GLOBAL in vioAll: continue
+            vioGlobal = vioAll[VioTrackKind.GLOBAL]
+            if not "position" in vioGlobal: continue
+            overlapVio, overlapGt = getOverlap(vioGlobal["position"], pGt)
+            metrics[metricSetStr] = None
+            if overlapVio.size <= 0 or overlapGt.size <= 0: continue
+            metrics[metricSetStr] = {
+                "RMSE": rmse(overlapGt, overlapVio),
+                "MAE": meanAbsoluteError(overlapGt, overlapVio),
+            }
+            computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
@@ -149,19 +166,19 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
 
     datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
     gt = datasets[0] if datasets else None
+    if not gt: return None
 
-    vio = readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseTrails=True)
-    vioPostprocessed = readVioOutput(benchmarkFolder, caseName, info, postprocessed=True, getPoseTrails=True)
+    vio = {}
+    for kind in [VioTrackKind.REALTIME, VioTrackKind.POSTPROCESSED, VioTrackKind.GLOBAL]:
+        vio[kind] = readVioOutput(benchmarkFolder, caseName, info, kind, getPoseTrails=True)
 
-    if gt:
-        metricsJson = computeMetricSets(vio, vioPostprocessed, gt, info, sampleIntervalForVelocity)
-        if baseline:
-            relative = computeRelativeMetrics(metricsJson, baseline)
-            metricsJson["relative"] = relative
-        metricsDir = "{}/metrics".format(benchmarkFolder)
-        pathlib.Path(metricsDir).mkdir(parents=True, exist_ok=True)
-        metricsPath = "{}/{}.json".format(metricsDir, caseName)
-        with open(metricsPath, "w") as metricsFile:
-            metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': ')))
-        return computeSummaryValue(metricsJson)
-    return None
+    metricsJson = computeMetricSets(vio, gt, info, sampleIntervalForVelocity)
+    if baseline:
+        relative = computeRelativeMetrics(metricsJson, baseline)
+        metricsJson["relative"] = relative
+    metricsDir = "{}/metrics".format(benchmarkFolder)
+    pathlib.Path(metricsDir).mkdir(parents=True, exist_ok=True)
+    metricsPath = "{}/{}.json".format(metricsDir, caseName)
+    with open(metricsPath, "w") as metricsFile:
+        metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': ')))
+    return computeSummaryValue(metricsJson)

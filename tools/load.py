@@ -4,6 +4,8 @@ import pathlib
 
 import numpy as np
 
+from .metric import *
+
 def readDatasetsCsv(fn):
     return [{"name": "groundTruth", "position": np.genfromtxt(fn, delimiter=',')}]
 
@@ -32,19 +34,20 @@ def readDatasetsJson(fn, include=[], exclude=[]):
 
 VIO_OUTPUT_CACHE = {}
 
-def readVioOutput(benchmarkFolder, caseName, info, postprocessed=False, getPoseTrails=False):
+def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=False):
     # Caching is not that beneficial here.
     global VIO_OUTPUT_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
-    key = "{}+{}+{}+{}".format(baseName, caseName, postprocessed, getPoseTrails)
+    key = "{}+{}+{}+{}".format(baseName, caseName, vioTrackKind.value, getPoseTrails)
     if key in VIO_OUTPUT_CACHE: return VIO_OUTPUT_CACHE[key].copy()
 
-    if postprocessed:
-        outputPath = "{}/vio-output/{}_map.jsonl".format(benchmarkFolder, caseName)
-        if not pathlib.Path(outputPath).exists():
-            return {}
-    else:
-        outputPath = "{}/vio-output/{}.jsonl".format(benchmarkFolder, caseName)
+    fileStem = ""
+    if vioTrackKind == VioTrackKind.POSTPROCESSED: fileStem = "_map"
+    elif vioTrackKind == VioTrackKind.GLOBAL: fileStem = "_global"
+
+    outputPath = "{}/vio-output/{}{}.jsonl".format(benchmarkFolder, caseName, fileStem)
+    if not pathlib.Path(outputPath).exists():
+        return {}
 
     def isValidVector(row, field):
         if field not in row: return False
