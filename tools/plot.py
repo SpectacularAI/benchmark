@@ -356,7 +356,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
             tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
             postprocessed = metricSet == Metric.POSTPROCESSED.value
-            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, postprocessed, getPoseTrails)
+            vioTrackKind = metricToTrackKind(Metric(metricSet))
+            vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, vioTrackKind, getPoseTrails)
 
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1

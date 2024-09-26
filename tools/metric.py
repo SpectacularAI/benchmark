@@ -16,12 +16,23 @@ PERCENTILES = [95, 100]
 # How many seconds into future the position and orientation are predicted
 PREDICTION_SECONDS = 0.03
 
+class VioTrackKind(Enum):
+    # VIO is allowed to only use data preceeding the output time.
+    # In the relevant use cases VIO often also needs to run in realtime with the given hardware.
+    REALTIME = "realtime"
+    # VIO is allowed to use the whole session data to optimize all outputs. Non-causal.
+    POSTPROCESSED = "postprocessed"
+    # Like `REALTIME`, but VIO must output WGS coordinates and there will be no aligning of the output tracks.
+    GLOBAL = "global"
+
 class Metric(Enum):
     # Track position error metrics:
     #
     # Do not align tracks in any way. Useful when VIO is is supplied with inputs that
     # allow it to track wrt a known coordinate system.
     NO_ALIGN = "no_align"
+    # Similar to `NO_ALIGN`, but requires VIO output and reference tracks in WGS coordinates.
+    GLOBAL = "global"
     # For non-piecewise alignment, this is the "proper" metric for VIO methods that
     # rotates the track only around the z-axis since the VIO is supposed to be able
     # to estimate direction of gravity (z-axis). The piecewise alignment methods are
@@ -61,6 +72,13 @@ class Metric(Enum):
     # Correlation of VIO tracking quality estimate to momentary tracking accuracy.
     TRACKING_QUALITY = "tracking_quality"
 
+def metricToTrackKind(metricSet):
+    if metricSet == Metric.POSTPROCESSED:
+        return VioTrackKind.POSTPROCESSED
+    if metricSet == Metric.GLOBAL:
+        return VioTrackKind.GLOBAL
+    return VioTrackKind.REALTIME
+
 def metricSetToAlignmentParams(metricSet):
     if metricSet in [
         Metric.FULL,
@@ -70,7 +88,7 @@ def metricSetToAlignmentParams(metricSet):
         Metric.PIECEWISE_NO_Z,
     ]:
         return {} # The defaults are correct.
-    elif metricSet == Metric.NO_ALIGN:
+    elif metricSet in [Metric.NO_ALIGN, Metric.GLOBAL]:
         return dict(alignEnabled=False)
     elif metricSet == Metric.FULL_3D:
         return dict(align3d=True)

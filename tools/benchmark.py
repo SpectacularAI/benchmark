@@ -67,6 +67,9 @@ def getArgParser():
     parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
     return parser
 
+def readJsonl(filePath):
+    with open(filePath) as f:
+        for l in f: yield(json.loads(l))
 
 class Benchmark:
     dir = None
@@ -164,8 +167,7 @@ TRACK_KINDS = {
     "externalPose": "externalPose",
 }
 
-def convertComparisonData(casePaths, metricSets):
-    gnssConverter = GnssConverter()
+def convertComparisonData(casePaths, metricSets, gnssConverter):
     frameCount = 0
     datasets = {}
 
@@ -288,6 +290,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         "output": "{}/{}.jsonl".format(dirs.out, caseName),
         "outputMap": "{}/{}_map.jsonl".format(dirs.out, caseName),
         "outputRealtime": "{}/{}_realtime.jsonl".format(dirs.out, caseName),
+        "outputGlobal": "{}/{}_global.jsonl".format(dirs.out, caseName),
         "gtJson": "{}/{}.json".format(dirs.groundTruth, caseName),
         "logs": "{}/{}.txt".format(dirs.logs, caseName),
     }
@@ -315,8 +318,29 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         print("No output for case", caseName)
         return
 
+    # It's important that the same GnssConverter instance is used for all VIO and reference tracks.
+    gnssConverter = GnssConverter()
+    outputGlobalFile = None
+    for obj in readJsonl(casePaths["output"]):
+        if not "globalPose" in obj: continue
+        # Create the file lazily because in many cases there is no global output.
+        if outputGlobalFile is None:
+            outputGlobalFile = open(casePaths["outputGlobal"], "w")
+        coordinates = obj["globalPose"]["coordinates"]
+        gobj = {
+            "time": obj["time"],
+            "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
+            "orientation": obj["globalPose"]["orientation"],
+            "velocity": obj["globalPose"]["velocity"],
+            "status": obj["status"],
+        }
+        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':')))
+        outputGlobalFile.write("\n")
+
+    if outputGlobalFile is not None: outputGlobalFile.close()
+
     metricSets = args.metricSet.split(",")
-    frameCount = convertComparisonData(casePaths, metricSets)
+    frameCount = convertComparisonData(casePaths, metricSets, gnssConverter)
 
     infoPath = "{}/{}.json".format(dirs.info, caseName)
     with open(infoPath, "w") as infoFile:
