@@ -259,6 +259,7 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
         for ind, track in enumerate(tracks):
             if ind == gtInd: continue
             if not "position" in tracks[gtInd]: continue
+            if not "position" in track: continue
             track["position"], _ = align(track["position"], tracks[gtInd]["position"], -1,
                 fix_origin=fixOrigin, **kwargsAlign)
 
