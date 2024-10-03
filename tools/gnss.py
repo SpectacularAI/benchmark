@@ -50,7 +50,7 @@ class GnssConverter:
         a = self.ell.a
         e2 = self.ell.e2
         p = np.sqrt(x**2 + y**2)
-        lon = np.arctan(y/x)
+        lon = np.arctan2(y, x)
 
         # latitude and altitude are computed by an iterative procedure.
         MAX_ITERS = 1000
