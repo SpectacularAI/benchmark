@@ -69,7 +69,11 @@ def getArgParser():
 
 def readJsonl(filePath):
     with open(filePath) as f:
-        for l in f: yield(json.loads(l))
+        for line in f:
+            try:
+                yield(json.loads(line))
+            except:
+                print(f"Skipping invalid JSON: `{line}`")
 
 class Benchmark:
     dir = None
