@@ -271,7 +271,7 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
 
         if track['position'].size == 0: continue
         axis.plot(track['position'][:, ax1], track['position'][:, ax2], label=track['name'],
-            color=getColor(track['name']), linewidth=1, marker=marker, markersize=3)
+            color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
         plotLoopClosures(track, axis, ax1, ax2)
         plotResets(track, axis, ax1, ax2)
 
@@ -335,7 +335,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
     for i, caseName in enumerate(caseNames):
         try:
-            titleStr = caseName
+            titleStr = "" if args.simplePlot else caseName
             caseMetrics = None
             relativeMetric = None
             plotAxis = subplots[i]
@@ -393,11 +393,13 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
 
             # Draw legend
-            for item in plotAxis.get_xticklabels() + plotAxis.get_yticklabels():
-                item.set_size(6)
+            plotAxis.tick_params(axis='both', which='major', labelsize=args.tickSize, width=args.lineWidth)
+            plotAxis.tick_params(axis='both', which='minor', labelsize=args.tickSize, width=args.lineWidth)
+            for spine in plotAxis.spines.values():
+                spine.set_linewidth(args.lineWidth)
 
             # Set titles
-            if caseMetrics:
+            if caseMetrics and not args.simplePlot:
                 if titleStr: titleStr += "\n"
                 if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
@@ -405,7 +407,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             plotAxis.title.set_text(titleStr)
 
             _, labels = plotAxis.get_legend_handles_labels()
-            if i == 0 and len(labels) > 0: plotAxis.legend()
+            if i == 0 and len(labels) > 0 and not args.simplePlot: plotAxis.legend()
 
         except Exception as e:
             if caseCount > 1:
@@ -429,6 +431,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False)
         figure.suptitle(suptitle, fontsize=20)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    elif args.simplePlot:
+        plt.tight_layout(rect=[0, 0, 1, 1])
 
     if args.showPlot:
         plt.show()
@@ -466,7 +470,7 @@ def plotBenchmark(args, benchmarkFolder):
             continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
-def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None):
+def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None, simplePlot=True):
     import argparse
     parser = argparse.ArgumentParser()
     plotArgs = parser.parse_args([])
@@ -476,6 +480,13 @@ def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocit
     varsPlotArgs["showPlot"] = False
     varsPlotArgs["excludePlots"] = excludePlots.split(",")
     varsPlotArgs["sampleIntervalForVelocity"] = sampleIntervalForVelocity
+    varsPlotArgs["lineWidth"] = 1
+    varsPlotArgs["tickSize"] = 6
+
+    if simplePlot:
+        varsPlotArgs["simplePlot"] = simplePlot
+        varsPlotArgs["lineWidth"] = 2
+        varsPlotArgs["tickSize"] = 20
 
     if not pathlib.Path(results).exists():
         raise Exception(f"No such folder: `{results}`")

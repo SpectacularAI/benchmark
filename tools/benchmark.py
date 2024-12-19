@@ -65,6 +65,7 @@ def getArgParser():
     parser.add_argument("-poseTrailLengths", type=str, default="1,2,4", help="Pose trail metrics target segment lengths, in seconds, separated by comma.")
     parser.add_argument("-savePoseTrail", action="store_true") # Set automatically.
     parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
+    parser.add_argument("-simplePlots", help="Reduce clutter in plots", action="store_true")
     return parser
 
 def readJsonl(filePath):
@@ -621,7 +622,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
-    makeAllPlots(results, args.excludePlots, args.debug, args.sampleIntervalForVelocity)
+    makeAllPlots(results, args.excludePlots, args.debug, args.sampleIntervalForVelocity, args.simplePlots)
     # Print the elapsed time since the plotting has been quite slow in the past.
     print("… took {:.0f}s.".format(time.time() - startTime))
 
