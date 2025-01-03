@@ -480,13 +480,14 @@ def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocit
     varsPlotArgs["showPlot"] = False
     varsPlotArgs["excludePlots"] = excludePlots.split(",")
     varsPlotArgs["sampleIntervalForVelocity"] = sampleIntervalForVelocity
-    varsPlotArgs["lineWidth"] = 1
-    varsPlotArgs["tickSize"] = 6
+    varsPlotArgs["simplePlot"] = simplePlot
 
     if simplePlot:
-        varsPlotArgs["simplePlot"] = simplePlot
         varsPlotArgs["lineWidth"] = 2
         varsPlotArgs["tickSize"] = 20
+    else:
+        varsPlotArgs["lineWidth"] = 1
+        varsPlotArgs["tickSize"] = 6
 
     if not pathlib.Path(results).exists():
         raise Exception(f"No such folder: `{results}`")
