@@ -102,7 +102,7 @@ def metricSetToAlignmentParams(metricSet):
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
-    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
+    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME, Metric.LENGTH, Metric.LENGTH_2D]:
         return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
