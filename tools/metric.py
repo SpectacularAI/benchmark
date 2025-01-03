@@ -11,7 +11,7 @@ PIECEWISE_METRIC_SCALE = 100.0
 COVERAGE_GAP_THRESHOLD_SECONDS = 1.0
 
 # Levels for absolute error metric percentiles.
-PERCENTILES = [95, 100]
+PERCENTILES = [50, 95, 100]
 
 # How many seconds into future the position and orientation are predicted
 PREDICTION_SECONDS = 0.03
@@ -100,7 +100,9 @@ def metricSetToAlignmentParams(metricSet):
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
 
 def percentileName(p):
-    return "max" if p == 100 else "p{}".format(p)
+    if p == 100: return "max"
+    if p == 50: return "median"
+    return "p{}".format(p)
 
 def rmse(a, b):
     """Root Mean Square Error"""
