@@ -100,7 +100,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
     if isinstance(metrics, float):
         s += "{:.2f}".format(metrics)
     elif "RMSE" in metrics:
-        s += "{:.3g}, {:.3g}".format(metrics["RMSE"], metrics["MAE"])
+        s += "{:.3g}".format(metrics["RMSE"])
         for p in PERCENTILES:
             name = percentileName(p)
             if name in metrics:
@@ -108,7 +108,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             else:
                 s += ", N/A"
         if not short:
-            s += " -- [rel RMSE] RMSE, MAE"
+            s += " -- [rel RMSE] RMSE"
             for p in PERCENTILES:
                 s += ", " + percentileName(p)
     else:
