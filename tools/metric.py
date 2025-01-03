@@ -10,6 +10,10 @@ PIECEWISE_METRIC_SCALE = 100.0
 # If VIO has break longer than this, subtract the break length from the coverage metric.
 COVERAGE_GAP_THRESHOLD_SECONDS = 1.0
 
+# If this is very small, then the LENGTH metric may overestimate the true length by accumulating noise in the data.
+# If the value is very large, then the LENGTH will be underestimated.
+LENGTH_MIN_SEGMENT_METERS = 1.0
+
 # Levels for absolute error metric percentiles.
 PERCENTILES = [50, 95, 100]
 
@@ -53,6 +57,10 @@ class Metric(Enum):
 
     # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
     COVERAGE = "coverage"
+    # Length (meters) of the ground truth trajectory (over the time period VIO video input covers).
+    LENGTH = "length"
+    # Same as LENGTH but ignores position changes in the vertical dimension.
+    LENGTH_2D = "length_2d"
     # RMSE of aligned angular velocities. May be computed from orientations if not available in the data.
     ANGULAR_VELOCITY = "angular_velocity"
     # RMSE of aligned velocities. May be computed from positions if not available in the data.
@@ -288,6 +296,31 @@ def computeAngularVelocity(data, intervalSeconds=None):
         if not av: continue
         avs.append(av)
     return np.array(avs)
+
+def computeLength(gt, info, dim=3):
+    if not "videoTimeSpan" in info or not info["videoTimeSpan"]: return None
+    if gt.size == 0: return None
+    # Use range of video input as the target, since in some datasets the ground truth
+    # samples cover a longer segment.
+    t0 = info["videoTimeSpan"][0]
+    t1 = info["videoTimeSpan"][1]
+    i = 0
+    p0 = None
+    length = 0.0
+    d2Min = pow(LENGTH_MIN_SEGMENT_METERS, 2)
+    assert(gt.shape[0] >= 1)
+    for i in range(gt.shape[0] - 1):
+        t = gt[i, 0]
+        if t < t0: continue
+        if t > t1: break
+        p1 = gt[i, 1:dim+1]
+        if p0 is None: p0 = p1
+        d2 = (p1 - p0).dot(p1 - p0)
+        if d2 >= d2Min:
+            length += math.sqrt(d2)
+            p0 = p1
+    length += np.linalg.norm(p1 - p0)
+    return length
 
 def computeCoverage(out, gt, info):
     if not "videoTimeSpan" in info or not info["videoTimeSpan"]: return None

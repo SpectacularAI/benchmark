@@ -60,6 +60,10 @@ def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
                 metrics[metricSetStr] = None
         elif metricSet == Metric.COVERAGE:
             metrics[metricSetStr] = computeCoverage(pVio, pGt, info)
+        elif metricSet == Metric.LENGTH:
+            metrics[metricSetStr] = computeLength(pGt, info, 3)
+        elif metricSet == Metric.LENGTH_2D:
+            metrics[metricSetStr] = computeLength(pGt, info, 2)
         elif metricSet == Metric.VELOCITY:
             metrics[metricSetStr] = computeVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.ANGULAR_VELOCITY:
