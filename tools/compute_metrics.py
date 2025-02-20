@@ -13,7 +13,7 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
+def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=None):
     if not VioTrackKind.REALTIME in vioAll:
         return {}
     vio = vioAll[VioTrackKind.REALTIME]
@@ -23,7 +23,6 @@ def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
         print("{}: VIO timestamps do not overlap with ground truth, cannot compute metrics or align."
             .format(info["caseName"]))
 
-    metricSets = info["metricSets"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
     poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
 
@@ -49,21 +48,20 @@ def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
         elif metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
-            alignedVio, unalignedGt = getOverlap(alignedVio, pGt)
-            if unalignedGt.size > 0 and alignedVio.size > 0:
-                metrics[metricSetStr] = {
-                    "RMSE": rmse(unalignedGt, alignedVio),
-                    "MAE": meanAbsoluteError(unalignedGt, alignedVio),
-                }
-                computePercentiles(unalignedGt, alignedVio, metrics[metricSetStr])
-            else:
-                metrics[metricSetStr] = None
+            overlapVio, overlapGt, overlapT = getOverlap(alignedVio, pGt, includeTime=True)
+            overlapVioWithTime = np.hstack((overlapT.reshape(-1, 1), overlapVio))
+            metrics[metricSetStr] = None
+            if overlapGt.size == 0 or overlapVio.size == 0: continue
+            metrics[metricSetStr] = {
+                "RMSE": rmse(overlapGt, overlapVio),
+                "MAE": meanAbsoluteError(overlapGt, overlapVio),
+                "drift": np.linalg.norm(overlapGt[-1] - overlapVio[-1]),
+                "lengthSeconds": overlapT[-1] - overlapT[0],
+                "lengthMeters": computeLength(overlapVioWithTime, info, 3),
+            }
+            computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         elif metricSet == Metric.COVERAGE:
             metrics[metricSetStr] = computeCoverage(pVio, pGt, info)
-        elif metricSet == Metric.LENGTH:
-            metrics[metricSetStr] = computeLength(pGt, info, 3)
-        elif metricSet == Metric.LENGTH_2D:
-            metrics[metricSetStr] = computeLength(pGt, info, 2)
         elif metricSet == Metric.VELOCITY:
             metrics[metricSetStr] = computeVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.ANGULAR_VELOCITY:
@@ -98,12 +96,16 @@ def computeMetricSets(vioAll, gt, info, sampleIntervalForVelocity=None):
             if not VioTrackKind.GLOBAL in vioAll: continue
             vioGlobal = vioAll[VioTrackKind.GLOBAL]
             if not "position" in vioGlobal: continue
-            overlapVio, overlapGt = getOverlap(vioGlobal["position"], pGt)
+            overlapVio, overlapGt, overlapT = getOverlap(vioGlobal["position"], pGt, includeTime=True)
             metrics[metricSetStr] = None
             if overlapVio.size <= 0 or overlapGt.size <= 0: continue
+            overlapGtWithTime = np.hstack((overlapT.reshape(-1, 1), overlapGt))
             metrics[metricSetStr] = {
                 "RMSE": rmse(overlapGt, overlapVio),
                 "MAE": meanAbsoluteError(overlapGt, overlapVio),
+                "drift": np.linalg.norm(overlapGt[-1] - overlapVio[-1]),
+                "lengthSeconds": overlapT[-1] - overlapT[0],
+                "lengthMeters": computeLength(overlapGtWithTime, info, 3),
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         else:
@@ -163,7 +165,7 @@ def computeRelativeMetrics(metrics, baseline):
         setRelativeMetric(relative, metricSetStr, a, b)
     return relative
 
-def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVelocity=None):
+def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVelocity=None, metricSets=None):
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
@@ -176,7 +178,9 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
     for kind in [VioTrackKind.REALTIME, VioTrackKind.POSTPROCESSED, VioTrackKind.GLOBAL]:
         vio[kind] = readVioOutput(benchmarkFolder, caseName, info, kind, getPoseTrails=True)
 
-    metricsJson = computeMetricSets(vio, gt, info, sampleIntervalForVelocity)
+    if metricSets is None: metricSets = info["metricSets"]
+
+    metricsJson = computeMetricSets(vio, gt, info, metricSets, sampleIntervalForVelocity)
     if baseline:
         relative = computeRelativeMetrics(metricsJson, baseline)
         metricsJson["relative"] = relative
