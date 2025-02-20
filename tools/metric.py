@@ -57,10 +57,6 @@ class Metric(Enum):
 
     # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
     COVERAGE = "coverage"
-    # Length (meters) of the ground truth trajectory (over the time period VIO video input covers).
-    LENGTH = "length"
-    # Same as LENGTH but ignores position changes in the vertical dimension.
-    LENGTH_2D = "length_2d"
     # RMSE of aligned angular velocities. May be computed from orientations if not available in the data.
     ANGULAR_VELOCITY = "angular_velocity"
     # RMSE of aligned velocities. May be computed from positions if not available in the data.
@@ -102,7 +98,7 @@ def metricSetToAlignmentParams(metricSet):
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
-    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME, Metric.LENGTH, Metric.LENGTH_2D]:
+    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
         return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
@@ -162,6 +158,7 @@ def getOverlapOrientations(vio, gt):
 def computePercentiles(a, b, out):
     """Absolute error below which given percentile of measurements fall"""
     assert(a.size != 0 and b.size != 0)
+    assert(a.shape == b.shape)
     err = np.sqrt(np.sum((a - b)**2, axis=1))
     err.sort()
     for p in PERCENTILES:
@@ -300,12 +297,14 @@ def computeAngularVelocity(data, intervalSeconds=None):
 def computeLength(gt, info, dim=3):
     if not "videoTimeSpan" in info or not info["videoTimeSpan"]: return None
     if gt.size == 0: return None
+    assert(gt.shape[1] == 4)
     # Use range of video input as the target, since in some datasets the ground truth
     # samples cover a longer segment.
     t0 = info["videoTimeSpan"][0]
     t1 = info["videoTimeSpan"][1]
     i = 0
     p0 = None
+    p1 = None
     length = 0.0
     d2Min = pow(LENGTH_MIN_SEGMENT_METERS, 2)
     assert(gt.shape[0] >= 1)
@@ -319,6 +318,7 @@ def computeLength(gt, info, dim=3):
         if d2 >= d2Min:
             length += math.sqrt(d2)
             p0 = p1
+    if p1 is None: return None
     length += np.linalg.norm(p1 - p0)
     return length
 
