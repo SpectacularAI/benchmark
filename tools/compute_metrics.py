@@ -151,7 +151,7 @@ def computeRelativeMetrics(metrics, baseline):
             a = np.mean(list(metrics[metricSetStr].values()))
             b = np.mean(list(baseline[metricSetStr].values()))
             setRelativeMetric(relative, metricSetStr, a, b)
-    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED, Metric.GLOBAL]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
             a = metrics[metricSetStr]["RMSE"]
