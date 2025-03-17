@@ -49,9 +49,9 @@ def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=No
             alignedVio, _ = align(pVio, pGt, -1,
                 fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
             overlapVio, overlapGt, overlapT = getOverlap(alignedVio, pGt, includeTime=True)
+            if overlapGt.size == 0 or overlapVio.size == 0: continue
             overlapVioWithTime = np.hstack((overlapT.reshape(-1, 1), overlapVio))
             metrics[metricSetStr] = None
-            if overlapGt.size == 0 or overlapVio.size == 0: continue
             metrics[metricSetStr] = {
                 "RMSE": rmse(overlapGt, overlapVio),
                 "MAE": meanAbsoluteError(overlapGt, overlapVio),

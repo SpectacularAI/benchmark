@@ -13,6 +13,7 @@ def isSparse(out):
 def getOverlap(out, gt, includeTime=False):
     """ Get overlapping parts of `out` and `gt` tracks on the time grid of `gt`. """
     if gt.size == 0 or out.size == 0:
+        if includeTime: return np.array([]), np.array([]), np.array([])
         return np.array([]), np.array([])
     assert(out.shape[1] == 4 and gt.shape[1] == 4)
     gt_t = gt[:, 0]
