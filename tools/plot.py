@@ -427,6 +427,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             _, labels = plotAxis.get_legend_handles_labels()
             if i == 0 and len(labels) > 0 and not args.simplePlot: plotAxis.legend()
 
+            if caseCount == 1:
+                if not "position" in vio or vio["position"].size == 0:
+                    plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
+
         except Exception as e:
             if caseCount > 1:
                 # For aggregate plots do not crash the entire plot but mark the failed case.
