@@ -443,6 +443,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     # Title for aggregate plot.
     if not args.caseName:
         suptitle = ""
+        if "set" in sharedInfo and "methodName" in sharedInfo:
+            suptitle += "{} - {}\n".format(sharedInfo["set"], sharedInfo["methodName"])
         if sharedInfo["parameters"]:
             suptitle += wordWrap(sharedInfo["parameters"])
         suptitle += "\n"
