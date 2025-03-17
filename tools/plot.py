@@ -307,6 +307,18 @@ def figureSize(rows, columns, square):
     elif columns <= 2 and rows <= 2: return (8 * columns, 8 * rows)
     return (4 * columns, 4 * rows)
 
+def shorten(s, maxLen=40):
+    tokens = reversed(s.split("-"))
+    s0 = next(tokens)
+    s1 = None
+    for token in tokens:
+        s1 = f"{token}-{s0}"
+        if len(s1) > maxLen: return s0
+        s0 = s1
+    if not s1:
+        return s
+    return s1
+
 def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
     if not args.showPlot:
         import matplotlib
@@ -337,7 +349,11 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
     for i, caseName in enumerate(caseNames):
         try:
-            titleStr = "" if args.simplePlot else caseName
+            if args.simplePlot:
+                titleStr = ""
+            else:
+                # Try to avoid text going over other subfigure titles.
+                titleStr = shorten(caseName)
             caseMetrics = None
             relativeMetric = None
             plotAxis = subplots[i]
