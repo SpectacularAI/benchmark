@@ -307,13 +307,13 @@ def figureSize(rows, columns, square):
     elif columns <= 2 and rows <= 2: return (8 * columns, 8 * rows)
     return (4 * columns, 4 * rows)
 
-def shorten(s, maxLen=40):
+def shorten(s, maxLen=50):
     tokens = reversed(s.split("-"))
     s0 = next(tokens)
     s1 = None
     for token in tokens:
         s1 = f"{token}-{s0}"
-        if len(s1) > maxLen: return s0
+        if len(s1) > maxLen: return f"..-{s0}"
         s0 = s1
     if not s1:
         return s
@@ -351,9 +351,11 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
         try:
             if args.simplePlot:
                 titleStr = ""
-            else:
+            elif caseCount > 1:
                 # Try to avoid text going over other subfigure titles.
                 titleStr = shorten(caseName)
+            else:
+                titleStr = caseName
             caseMetrics = None
             relativeMetric = None
             plotAxis = subplots[i]
@@ -427,9 +429,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             _, labels = plotAxis.get_legend_handles_labels()
             if i == 0 and len(labels) > 0 and not args.simplePlot: plotAxis.legend()
 
-            if caseCount == 1:
-                if not "position" in vio or vio["position"].size == 0:
-                    plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
+            if not "position" in vio or vio["position"].size == 0:
+                plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
 
         except Exception as e:
             if caseCount > 1:
