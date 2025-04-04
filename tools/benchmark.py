@@ -407,8 +407,12 @@ def setupBenchmarkFromSetDescription(args, setName):
         print("For {} parameters sets: {}".format(len(setDefinition["parameterSets"]),
             ", ".join("[" + s["params"] + "]" for s in setDefinition["parameterSets"])))
     for benchmark in setDefinition["benchmarks"]:
-        for parameterSet in parameterSets:
+        if "rootDataDir" in setDefinition:
+            dir = str(pathlib.Path(setDefinition["rootDataDir"]) / benchmark["folder"])
+        else:
             dir = args.rootDataDir + "/" + benchmark["folder"]
+
+        for parameterSet in parameterSets:
             params = []
             if parameterSet.get("params"): params.append(parameterSet["params"])
             if benchmark.get("params"): params.append(benchmark["params"])
