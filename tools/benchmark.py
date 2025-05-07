@@ -358,6 +358,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "frameCount": frameCount,
             "metricSets": metricSets,
             "fixOrigin": args.fixOrigin,
+            "sampleIntervalForVelocity": args.sampleIntervalForVelocity,
             "videoTimeSpan": computeVideoTimeSpan(casePaths["input"]),
             "poseTrailLengths": [float(s) for s in args.poseTrailLengths.split(",")],
         }
@@ -370,7 +371,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         baseline = baselineMetrics[caseName]
 
     try:
-        metric = computeMetrics(dirs.results, caseName, baseline, args.sampleIntervalForVelocity)
+        metric = computeMetrics(dirs.results, caseName, baseline)
     except Exception as e:
         if args.debug:
             import traceback
@@ -626,7 +627,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
-    makeAllPlots(results, args.excludePlots, args.debug, args.sampleIntervalForVelocity, args.simplePlots)
+    makeAllPlots(results, args.excludePlots, args.debug, args.simplePlots)
     # Print the elapsed time since the plotting has been quite slow in the past.
     print("… took {:.0f}s.".format(time.time() - startTime))
 
