@@ -13,7 +13,7 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=None):
+def computeMetricSets(vioAll, gt, info, metricSets):
     if not VioTrackKind.REALTIME in vioAll:
         return {}
     vio = vioAll[VioTrackKind.REALTIME]
@@ -25,6 +25,7 @@ def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=No
 
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
     poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
+    sampleIntervalForVelocity = info["sampleIntervalForVelocity"] if "sampleIntervalForVelocity" in info else None
 
     metrics = {}
     for metricSetStr in metricSets:
@@ -108,6 +109,10 @@ def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=No
                 "lengthMeters": computeLength(overlapGtWithTime, info, 3),
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
+        elif metricSet == Metric.GLOBAL_VELOCITY:
+            if not VioTrackKind.GLOBAL in vioAll: continue
+            vioGlobal = vioAll[VioTrackKind.GLOBAL]
+            metrics[metricSetStr] = computeGlobalVelocityMetric(vioGlobal, gt, sampleIntervalForVelocity)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
@@ -165,7 +170,7 @@ def computeRelativeMetrics(metrics, baseline):
         setRelativeMetric(relative, metricSetStr, a, b)
     return relative
 
-def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVelocity=None, metricSets=None):
+def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
@@ -180,7 +185,7 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, sampleIntervalForVe
 
     if metricSets is None: metricSets = info["metricSets"]
 
-    metricsJson = computeMetricSets(vio, gt, info, metricSets, sampleIntervalForVelocity)
+    metricsJson = computeMetricSets(vio, gt, info, metricSets)
     if baseline:
         relative = computeRelativeMetrics(metricsJson, baseline)
         metricsJson["relative"] = relative

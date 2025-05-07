@@ -123,13 +123,40 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " -- [rel mean] mean, ({})".format(legend)
     return s
 
-def plotVelocity(args, vio, tracks, axis, speed=False):
+def plotGlobalVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
+    import matplotlib.pyplot as plt
+    data = [vio]
+    if len(tracks) >= 1:
+        gt = tracks[0]
+        gtV = computeVelocity(gt, sampleIntervalForVelocity)
+        data.append({ "name": gt["name"], "velocity": gtV })
+    t0 = None
+    for d in data:
+        if d["velocity"].size == 0: continue
+        if not t0: t0 = d["velocity"][0, 0]
+        vs = d["velocity"].copy()
+        vs[:, 0] -= t0
+
+        # Plot only part to keep the plot legible.
+        vs = vs[vs[:, 0] < 180, :]
+
+        if vs.size == 0: continue
+        if speed:
+            axis.plot(vs[:, 0], np.linalg.norm(vs[:, 1:], axis=1), label=d['name'],
+                color=getColor(d['name']), linewidth=1)
+        else:
+            for ind in range(1, 4):
+                label = d['name'] if ind == 1 else None
+                axis.plot(vs[:, 0], vs[:, ind], label=label,
+                    color=getColor(d['name']), linewidth=1)
+
+def plotVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        preComputeAlignedVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
+        preComputeAlignedVelocity(vio, tracks[0], sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["velocity"] = computeVelocity(vio, args.sampleIntervalForVelocity)
+        vio["velocity"] = computeVelocity(vio, sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
@@ -152,13 +179,13 @@ def plotVelocity(args, vio, tracks, axis, speed=False):
                 axis.plot(vs[:, 0], vs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
-def plotAngularVelocity(args, vio, tracks, axis, speed=False):
+def plotAngularVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
-        preComputeAlignedAngularVelocity(vio, tracks[0], args.sampleIntervalForVelocity)
+        preComputeAlignedAngularVelocity(vio, tracks[0], sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["angularVelocity"] = computeAngularVelocity(vio, args.sampleIntervalForVelocity)
+        vio["angularVelocity"] = computeAngularVelocity(vio, sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
@@ -380,16 +407,21 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             vioTrackKind = metricToTrackKind(Metric(metricSet))
             vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, vioTrackKind, getPoseTrails)
 
+            sampleIntervalForVelocity = None
+            if "sampleIntervalForVelocity" in caseInfo:
+                sampleIntervalForVelocity = caseInfo["sampleIntervalForVelocity"]
+
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
             ax2 = 3 if args.z_axis else 2
 
             if metricSet == Metric.ANGULAR_VELOCITY.value:
-                if not args.z_axis: plotAngularVelocity(args, vio, tracks, plotAxis)
-                else: plotAngularVelocity(args, vio, tracks, plotAxis, speed=True)
+                # Use z_axis argument as hack to enable speed mode.
+                plotAngularVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif metricSet == Metric.VELOCITY.value:
-                if not args.z_axis: plotVelocity(args, vio, tracks, plotAxis)
-                else: plotVelocity(args, vio, tracks, plotAxis, speed=True)
+                plotVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
+            elif metricSet == Metric.GLOBAL_VELOCITY.value:
+                plotGlobalVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
@@ -495,7 +527,7 @@ def plotBenchmark(args, benchmarkFolder):
             continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
-def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocity=None, simplePlot=True):
+def makeAllPlots(results, excludePlots="", debug=False, simplePlot=True):
     import argparse
     parser = argparse.ArgumentParser()
     plotArgs = parser.parse_args([])
@@ -504,7 +536,6 @@ def makeAllPlots(results, excludePlots="", debug=False, sampleIntervalForVelocit
     varsPlotArgs["compactRotation"] = False
     varsPlotArgs["showPlot"] = False
     varsPlotArgs["excludePlots"] = excludePlots.split(",")
-    varsPlotArgs["sampleIntervalForVelocity"] = sampleIntervalForVelocity
     varsPlotArgs["simplePlot"] = simplePlot
 
     if simplePlot:
