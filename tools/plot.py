@@ -123,6 +123,34 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " -- [rel mean] mean, ({})".format(legend)
     return s
 
+def plotGlobalVelocity(args, vio, tracks, axis, speed=False):
+    import matplotlib.pyplot as plt
+    data = [vio]
+    if len(tracks) >= 1:
+        gt = tracks[0]
+        # TODO Should save the sample interval used when computing the metrics.
+        gtV = computeVelocity(gt, 0.02)
+        data.append({ "name": gt["name"], "velocity": gtV })
+    t0 = None
+    for d in data:
+        if d["velocity"].size == 0: continue
+        if not t0: t0 = d["velocity"][0, 0]
+        vs = d["velocity"]
+        vs[:, 0] -= t0
+
+        # Plot only part to keep the plot legible.
+        vs = vs[vs[:, 0] < 180, :]
+
+        if vs.size == 0: continue
+        if speed:
+            axis.plot(vs[:, 0], np.linalg.norm(vs[:, 1:], axis=1), label=d['name'],
+                color=getColor(d['name']), linewidth=1)
+        else:
+            for ind in range(1, 4):
+                label = d['name'] if ind == 1 else None
+                axis.plot(vs[:, 0], vs[:, ind], label=label,
+                    color=getColor(d['name']), linewidth=1)
+
 def plotVelocity(args, vio, tracks, axis, speed=False):
     import matplotlib.pyplot as plt
     if len(tracks) >= 1:
@@ -385,11 +413,12 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             ax2 = 3 if args.z_axis else 2
 
             if metricSet == Metric.ANGULAR_VELOCITY.value:
-                if not args.z_axis: plotAngularVelocity(args, vio, tracks, plotAxis)
-                else: plotAngularVelocity(args, vio, tracks, plotAxis, speed=True)
+                # Use z_axis argument as hack to enable speed mode.
+                plotAngularVelocity(args, vio, tracks, plotAxis, speed=args.z_axis)
             elif metricSet == Metric.VELOCITY.value:
-                if not args.z_axis: plotVelocity(args, vio, tracks, plotAxis)
-                else: plotVelocity(args, vio, tracks, plotAxis, speed=True)
+                plotVelocity(args, vio, tracks, plotAxis, speed=args.z_axis)
+            elif metricSet == Metric.GLOBAL_VELOCITY.value:
+                plotGlobalVelocity(args, vio, tracks, plotAxis, speed=args.z_axis)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.

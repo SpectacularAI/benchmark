@@ -81,7 +81,7 @@ class Metric(Enum):
 def metricToTrackKind(metricSet):
     if metricSet == Metric.POSTPROCESSED:
         return VioTrackKind.POSTPROCESSED
-    if metricSet == Metric.GLOBAL:
+    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY]:
         return VioTrackKind.GLOBAL
     return VioTrackKind.REALTIME
 
@@ -94,7 +94,7 @@ def metricSetToAlignmentParams(metricSet):
         Metric.PIECEWISE_NO_Z,
     ]:
         return {} # The defaults are correct.
-    elif metricSet in [Metric.NO_ALIGN, Metric.GLOBAL]:
+    elif metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.GLOBAL_VELOCITY]:
         return dict(alignEnabled=False)
     elif metricSet == Metric.FULL_3D:
         return dict(align3d=True)
@@ -238,8 +238,8 @@ def computeVelocity(data, intervalSeconds=None):
         dt = p[i + 1, 0] - p[i - 1, 0]
         if dt <= 0: continue
         dp = p[i + 1, 1:] - p[i - 1, 1:]
-        if FILTER_SPIKES and np.linalg.norm(dp) > 0.1: continue
         v = dp / dt
+        if FILTER_SPIKES and np.linalg.norm(v) > 50.: continue
         vs.append([p[i, 0], v[0], v[1], v[2]])
     return np.array(vs)
 
