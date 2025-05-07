@@ -61,6 +61,8 @@ class Metric(Enum):
     ANGULAR_VELOCITY = "angular_velocity"
     # RMSE of aligned velocities. May be computed from positions if not available in the data.
     VELOCITY = "velocity"
+    # Like VELOCITY but with WGS velocities without alignment.
+    GLOBAL_VELOCITY = "global_velocity"
     # Like `FULL`, but for sparse postprocessed output, eg our VIO's SLAM map keyframes.
     POSTPROCESSED = "postprocessed"
     # Output from UNIX `time` command (not wall time).
@@ -128,8 +130,10 @@ def getIncludedOverlap(sourceTimes, targetTimes):
     return (sourceStartInd, sourceEndInd + 1)
 
 def getOverlapOrientations(vio, gt):
-    # TODO: Cache this
     from scipy.spatial.transform import Rotation, Slerp
+
+    if gt["orientation"].size == 0: return None
+
     # `Slerp` requires that the interpolation grid is inside the data time boundaries.
     tVio = vio["position"][:, 0]
     tGt = gt["position"][:, 0]
@@ -184,8 +188,16 @@ def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     normalizedRmse = PIECEWISE_METRIC_SCALE * rmse(gt, interpolated) / np.sqrt(pieceLenSecs)
     return normalizedRmse
 
+def computeGlobalVelocityMetric(vio, gt, intervalSeconds=None):
+    if "velocity" not in vio: return None
+    gtV = computeVelocity(gt, intervalSeconds)
+    vioPart, gtPart = getOverlap(vio["velocity"], gtV)
+    if gtPart.size == 0 or vioPart.size == 0: return None
+    return rmse(gtPart, vioPart)
+
 def computeVelocityMetric(vio, gt, intervalSeconds=None):
     preComputeAlignedVelocity(vio, gt, intervalSeconds)
+    if "alignedVelocity" not in vio or "alignedVelocity" not in gt: return None
     vioPart, gtPart = getOverlap(vio["alignedVelocity"], gt["alignedVelocity"])
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
@@ -197,7 +209,9 @@ def preComputeAlignedVelocity(vio, gt, intervalSeconds=None):
     # vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=True, fix_scale=True, origin_zero=True)
     # vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
     vioVAligned = np.copy(vioV)
-    vioVAligned[:,1:] = getOverlapOrientations(vio, gt)["avgRotation"].apply(vioV[:,1:])
+    orientations = getOverlapOrientations(vio, gt)
+    if orientations is None: return
+    vioVAligned[:,1:] = orientations["avgRotation"].apply(vioV[:,1:])
     vio["alignedVelocity"] = vioVAligned
     gt["alignedVelocity"] = gtV
 

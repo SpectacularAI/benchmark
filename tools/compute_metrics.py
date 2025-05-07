@@ -108,6 +108,10 @@ def computeMetricSets(vioAll, gt, info, metricSets, sampleIntervalForVelocity=No
                 "lengthMeters": computeLength(overlapGtWithTime, info, 3),
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
+        elif metricSet == Metric.GLOBAL_VELOCITY:
+            if not VioTrackKind.GLOBAL in vioAll: continue
+            vioGlobal = vioAll[VioTrackKind.GLOBAL]
+            metrics[metricSetStr] = computeGlobalVelocityMetric(vioGlobal, gt, sampleIntervalForVelocity)
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
