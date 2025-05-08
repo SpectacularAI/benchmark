@@ -123,8 +123,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " -- [rel mean] mean, ({})".format(legend)
     return s
 
-def plotGlobalVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
-    import matplotlib.pyplot as plt
+def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     data = [vio]
     if len(tracks) >= 1:
         gt = tracks[0]
@@ -150,8 +149,7 @@ def plotGlobalVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed
                 axis.plot(vs[:, 0], vs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
-def plotVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
-    import matplotlib.pyplot as plt
+def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     if len(tracks) >= 1:
         preComputeAlignedVelocity(vio, tracks[0], sampleIntervalForVelocity)
         data = [tracks[0], vio]
@@ -278,6 +276,31 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2, info):
         label = "Inertial-only (using VIO biases and velocity)" if segmentInd == 0 else None
         axis.plot(x, y, label=label, color="green", linewidth=1)
 
+def plotErrorOverTime(gt, vio, axis, z_axis, includeLegend):
+    oVio, oGt, time = getOverlap(vio["position"], gt["position"], includeTime=True)
+    if time.size == 0: return
+    time -= time[0]
+
+    if z_axis:
+        err = np.abs(oVio[:, 2] - oGt[:, 2])
+    else:
+        err = np.linalg.norm(oVio - oGt, axis=1)
+
+    axis.plot(time, err, label='Error')
+    axis.set_xlabel('Time [s]')
+    axis.set_ylabel('Error [m]')
+
+    # Create secondary y-axis.
+    axis2 = axis.twinx()
+    axis2.plot(time, oGt[:, 2], 'k--', label='Altitude ({})'.format(gt["name"]), alpha=0.7)
+    axis2.set_ylabel('Altitude [m]')
+
+    # Combine legends from both axes.
+    if includeLegend:
+        lines1, labels1 = axis.get_legend_handles_labels()
+        lines2, labels2 = axis2.get_legend_handles_labels()
+        axis.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
@@ -324,7 +347,11 @@ def plotResets(track, axis, ax1, ax2):
         axis.plot(pr[ax1], pr[ax2], color="cyan", marker="o", markersize=8, label=label)
 
 # Returns inches. Multiplying with the `dpi=100` argument of `savefig()` gives the saved image resolution.
-def figureSize(rows, columns, square):
+def figureSize(rows, columns, square, metricSet):
+    # Wide plots.
+    if rows == 1 and columns == 1 and metricSet == Metric.GLOBAL_ERROR_OVER_TIME.value:
+        return (24, 13.5)
+
     if square:
         numPlots = rows * columns
         if numPlots <= 16: return (15, 15)
@@ -367,7 +394,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
         rows = 1
         while rows * columns < caseCount: rows += 1
 
-    figure, subplots = plt.subplots(rows, columns, figsize=figureSize(rows, columns, SQUARE_IMAGE))
+    figure, subplots = plt.subplots(rows, columns, figsize=figureSize(rows, columns, SQUARE_IMAGE, metricSet))
     subplots = np.ravel(subplots)
     for i, s in enumerate(subplots):
         if i >= caseCount: s.axis("off")
@@ -411,6 +438,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             if "sampleIntervalForVelocity" in caseInfo:
                 sampleIntervalForVelocity = caseInfo["sampleIntervalForVelocity"]
 
+            includeLegend = i == 0 and len(labels) > 0 and not args.simplePlot
+
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
             ax2 = 3 if args.z_axis else 2
@@ -419,9 +448,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 # Use z_axis argument as hack to enable speed mode.
                 plotAngularVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif metricSet == Metric.VELOCITY.value:
-                plotVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
+                plotVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif metricSet == Metric.GLOBAL_VELOCITY.value:
-                plotGlobalVelocity(args, vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
+                plotGlobalVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
@@ -439,6 +468,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotTrackingQuality(vio, plotAxis, metrics)
             elif metricSet == Metric.POSE_TRAIL_3D.value:
                 plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2, caseInfo)
+            elif metricSet == Metric.GLOBAL_ERROR_OVER_TIME.value:
+                if len(tracks) >= 1:
+                    plotErrorOverTime(tracks[0], vio, plotAxis, args.z_axis, includeLegend)
+                    includeLegend = True
             else:
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
@@ -458,8 +491,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
             plotAxis.title.set_text(titleStr)
 
-            _, labels = plotAxis.get_legend_handles_labels()
-            if i == 0 and len(labels) > 0 and not args.simplePlot: plotAxis.legend()
+            if includeLegend:
+                _, labels = plotAxis.get_legend_handles_labels()
+                plotAxis.legend()
 
             if not "position" in vio or vio["position"].size == 0:
                 plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
@@ -481,7 +515,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
         if sharedInfo["parameters"]:
             suptitle += wordWrap(sharedInfo["parameters"])
         suptitle += "\n"
-        if sharedInfo["metrics"]:
+        if sharedInfo["metrics"] and metricSet in sharedInfo["metrics"]:
             relativeMetric = None
             if "relative" in sharedInfo["metrics"] and sharedInfo["metrics"]["relative"] and metricSet in sharedInfo["metrics"]["relative"]:
                 relativeMetric = sharedInfo["metrics"]["relative"][metricSet]
@@ -514,13 +548,9 @@ def plotBenchmark(args, benchmarkFolder):
 
     with open(benchmarkFolder + "/info.json") as sharedInfoJsonFile:
         sharedInfo = json.loads(sharedInfoJsonFile.read())
-        m = sharedInfo["metrics"]
-        # Shared info `metrics` field is "null" if none of the cases have ground truth,
-        # in that case produce one plot, does not matter which since it won't have any numbers.
-        metricSets = list(m.keys()) if m else ["piecewise"]
-        metricSets = [m for m in metricSets if m != "relative"]
+        metricSets = sharedInfo["metricSets"]
 
-    for ind, metricSet in enumerate(metricSets):
+    for metricSet in metricSets:
         # TODO Plotting is somewhat slow. Could skip eg for CPU_TIME if there
         # was some other convenient way to present the results besides the aggregate figure.
         if args.z_axis and metricSet in [Metric.ORIENTATION.value, Metric.ORIENTATION_FULL.value, Metric.ORIENTATION_ALIGNED.value, Metric.PREDICTION.value, Metric.TRACKING_QUALITY.value]:
@@ -567,4 +597,7 @@ def makeAllPlots(results, excludePlots="", debug=False, simplePlot=True):
         varsPlotArgs["z_axis"] = True
         plotBenchmark(plotArgs, results)
     except Exception as e:
+        if debug:
+            import traceback
+            print(traceback.format_exc())
         print("plotBenchmark() failed for aggregate (z_axis {}): {}".format(varsPlotArgs["z_axis"], e))

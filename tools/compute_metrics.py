@@ -113,6 +113,8 @@ def computeMetricSets(vioAll, gt, info, metricSets):
             if not VioTrackKind.GLOBAL in vioAll: continue
             vioGlobal = vioAll[VioTrackKind.GLOBAL]
             metrics[metricSetStr] = computeGlobalVelocityMetric(vioGlobal, gt, sampleIntervalForVelocity)
+        elif metricSet == Metric.GLOBAL_ERROR_OVER_TIME:
+            pass # Plot only.
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
     return metrics
