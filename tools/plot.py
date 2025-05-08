@@ -25,6 +25,7 @@ EXTERNAL_COLORS = {
     'gps': 'darkred',
     'rtkgps': 'salmon',
     'externalpose': 'salmon',
+    'vio positions': 'darkgreen',
 }
 
 def getColor(datasetName="ours", index=0):
@@ -125,10 +126,16 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
 
 def plotGlobalVelocity(args, vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     import matplotlib.pyplot as plt
+
     data = [vio]
+
+    sampleInterval = 0.5
+    vioV = computeVelocity(vio, sampleInterval, False)
+    data.append({ "name": "VIO positions", "velocity": vioV })
+
     if len(tracks) >= 1:
         gt = tracks[0]
-        gtV = computeVelocity(gt, sampleIntervalForVelocity)
+        gtV = computeVelocity(gt, sampleInterval)
         data.append({ "name": gt["name"], "velocity": gtV })
     t0 = None
     for d in data:
