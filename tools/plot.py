@@ -438,7 +438,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             if "sampleIntervalForVelocity" in caseInfo:
                 sampleIntervalForVelocity = caseInfo["sampleIntervalForVelocity"]
 
-            includeLegend = i == 0 and len(labels) > 0 and not args.simplePlot
+            includeLegend = i == 0 and not args.simplePlot
 
             vio["name"] = sharedInfo["methodName"]
             ax1 = 1
@@ -491,8 +491,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
             plotAxis.title.set_text(titleStr)
 
-            if includeLegend:
-                _, labels = plotAxis.get_legend_handles_labels()
+            _, labels = plotAxis.get_legend_handles_labels()
+            if includeLegend and len(labels) > 0:
                 plotAxis.legend()
 
             if not "position" in vio or vio["position"].size == 0:
