@@ -78,10 +78,13 @@ class Metric(Enum):
     # Correlation of VIO tracking quality estimate to momentary tracking accuracy.
     TRACKING_QUALITY = "tracking_quality"
 
+    # A plot of RMSE over time, together with altitude.
+    GLOBAL_ERROR_OVER_TIME = "global_error_over_time"
+
 def metricToTrackKind(metricSet):
     if metricSet == Metric.POSTPROCESSED:
         return VioTrackKind.POSTPROCESSED
-    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY]:
+    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY, Metric.GLOBAL_ERROR_OVER_TIME]:
         return VioTrackKind.GLOBAL
     return VioTrackKind.REALTIME
 

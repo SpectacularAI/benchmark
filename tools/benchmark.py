@@ -2,14 +2,12 @@
 """ VIO benchmarking library. """
 
 import argparse
-from collections import OrderedDict
 from datetime import datetime
 import time
 import subprocess
 import os
 import pathlib
 import json
-from collections import deque
 import concurrent.futures
 from functools import partial
 import multiprocessing
@@ -116,11 +114,13 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
     def runAndCapture(cmd):
         return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
 
+    metricSets = args.metricSet.split(",")
     info = {
         "outputDirectory": dirs.results,
         "startTime": startTime,
         "endTime": endTime,
         "metrics": aggregateMetrics,
+        "metricSets": metricSets,
         "parameters": args.params,
     }
 
