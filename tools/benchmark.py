@@ -287,7 +287,15 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
 def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics=None):
     caseDir = benchmark.dir
-    caseName = benchmark.name
+    shortName = benchmark.name
+
+    # This makes sure `caseName` contains the optional custom `rootDataDir` in it.
+    def getCaseName(s):
+        s = s.replace("data/benchmark/", "")
+        s = s.replace("data/confidential/", "")
+        s = s.replace("/", "-")
+        return s
+    caseName = getCaseName(caseDir)
 
     casePaths = {
         "input": caseDir + "/data.jsonl",
@@ -351,6 +359,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
     with open(infoPath, "w") as infoFile:
         infoJson = {
             "caseName": caseName,
+            "shortName": shortName,
             "dir": benchmark.dir,
             "paramSet": benchmark.paramSet,
             "methodName": args.methodName,
