@@ -289,13 +289,14 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
     caseDir = benchmark.dir
     shortName = benchmark.name
 
-    # This makes sure `caseName` contains the optional custom `rootDataDir` in it.
-    def getCaseName(s):
+    # This canocalizes the dataset name for baseline comparisons.
+    def getCaseName(s, shortName):
+        if s.startswith("/"): return shortName
         s = s.replace("data/benchmark/", "")
         s = s.replace("data/confidential/", "")
         s = s.replace("/", "-")
         return s
-    caseName = getCaseName(caseDir)
+    caseName = getCaseName(caseDir, shortName)
 
     casePaths = {
         "input": caseDir + "/data.jsonl",
