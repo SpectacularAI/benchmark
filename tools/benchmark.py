@@ -408,8 +408,12 @@ def setupBenchmarkFromSetDescription(args, setName):
         print("For {} parameters sets: {}".format(len(setDefinition["parameterSets"]),
             ", ".join("[" + s["params"] + "]" for s in setDefinition["parameterSets"])))
     for benchmark in setDefinition["benchmarks"]:
+        prefix = ""
         if "rootDataDir" in setDefinition:
             dir = str(pathlib.Path(setDefinition["rootDataDir"]) / benchmark["folder"])
+            for s in ["data/benchmark/", "data/confidential/"]:
+                if setDefinition["rootDataDir"].startswith(s):
+                    prefix = setDefinition["rootDataDir"].replace(s, "")
         else:
             dir = args.rootDataDir + "/" + benchmark["folder"]
 
@@ -417,11 +421,13 @@ def setupBenchmarkFromSetDescription(args, setName):
             params = []
             if parameterSet.get("params"): params.append(parameterSet["params"])
             if benchmark.get("params"): params.append(benchmark["params"])
-            if benchmark.get("name"):
-                name = benchmark.get("name").replace(' ', '-')
-            else:
-                name = benchmark["folder"]
-                for symbol in " _/": name = name.replace(symbol, '-')
+
+            if benchmark.get("name"): name = benchmark.get("name")
+            else: name = benchmark["folder"]
+
+            if prefix: name = f"{prefix}-{name}"
+            for symbol in " _/": name = name.replace(symbol, '-')
+
             if parameterSet.get("name"): name = "{}-{}".format(name, parameterSet.get("name").replace(' ', '-'))
             benchmarks.append(Benchmark(
                 dir=dir,
