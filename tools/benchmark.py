@@ -409,11 +409,15 @@ def setupBenchmarkFromSetDescription(args, setName):
             ", ".join("[" + s["params"] + "]" for s in setDefinition["parameterSets"])))
     for benchmark in setDefinition["benchmarks"]:
         prefix = ""
-        if "rootDataDir" in setDefinition:
-            dir = str(pathlib.Path(setDefinition["rootDataDir"]) / benchmark["folder"])
+        for level in [benchmark, setDefinition]:
+            if not "rootDataDir" in level: continue
+            rootDataDir = level["rootDataDir"]
+
+            dir = str(pathlib.Path(rootDataDir) / benchmark["folder"])
             for s in ["data/benchmark/", "data/confidential/"]:
-                if setDefinition["rootDataDir"].startswith(s):
-                    prefix = setDefinition["rootDataDir"].replace(s, "")
+                if rootDataDir.startswith(s):
+                    prefix = rootDataDir.replace(s, "")
+            break
         else:
             dir = args.rootDataDir + "/" + benchmark["folder"]
 
