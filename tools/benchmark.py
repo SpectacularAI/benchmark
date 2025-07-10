@@ -376,9 +376,11 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         print("computeMetrics() failed for {}: {}".format(caseName, e))
         return False
 
-    metricStr = "N/A" # Either no ground-truth or no VIO output.
-    if metric: metricStr = "{:.3f}".format(metric)
-    print("{:40} {:>6.0f}s   metric: {:>8}".format(caseName, duration, metricStr))
+    if metric:
+        metricValue = "{:.3f}".format(metric[1])
+        print("{:40} {:>6.0f}s   {}: {:>8}".format(caseName, duration, metric[0], metricValue))
+    else:
+        print("{:40} {:>6.0f}s   no metric".format(caseName, duration))
     return vioSuccess
 
 # Look for the set file in a predefined directory or by path.

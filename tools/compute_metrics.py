@@ -123,19 +123,19 @@ def computeMetricSets(vioAll, gt, info, metricSets):
 # for the available metrics. If the most prefered metric computation has failed, output `None`
 # rather than falling back to another metric (as that would mess up averages across multiple cases).
 def computeSummaryValue(metricsJson):
-    if Metric.POSE_TRAIL_3D in metricsJson:
-        return metricsJson[Metric.POSE_TRAIL_3D]["3s"] # In case the pose trail is sometimes/always shorter than 10s.
+    if Metric.POSE_TRAIL_3D.value in metricsJson:
+        return ("pose trail 3s", metricsJson[Metric.POSE_TRAIL_3D.value]["3s"])
+    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+        if not metricSet.value in metricsJson: continue
+        if not metricsJson[metricSet.value]: return None
+        return (f"{metricSet.value} RMSE", metricsJson[metricSet.value]["RMSE"])
     for metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
-        return np.mean(list(metricsJson[metricSet.value].values()))
-    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
-        if not metricSet.value in metricsJson: continue
-        if not metricsJson[metricSet.value]: return None
-        return metricsJson[metricSet.value]["RMSE"]
+        return ("piecewise", np.mean(list(metricsJson[metricSet.value].values())))
     for metricSet in [Metric.POSTPROCESSED, Metric.COVERAGE, Metric.ANGULAR_VELOCITY, Metric.CPU_TIME]:
         if not metricSet.value in metricsJson: continue
-        return metricsJson[metricSet.value]
+        return (metricSet.value, metricsJson[metricSet.value])
     return None
 
 def setRelativeMetric(relative, metricSetStr, a, b):
@@ -158,7 +158,7 @@ def computeRelativeMetrics(metrics, baseline):
             a = np.mean(list(metrics[metricSetStr].values()))
             b = np.mean(list(baseline[metricSetStr].values()))
             setRelativeMetric(relative, metricSetStr, a, b)
-    for metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED, Metric.GLOBAL]:
+    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
             a = metrics[metricSetStr]["RMSE"]
