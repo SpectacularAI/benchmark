@@ -21,10 +21,7 @@ import numpy as np
 DATE_FORMAT = "%Y-%m-%d_%H-%M-%S"
 
 DEFAULT_OUTPUT_DIR = "output"
-DEFAULT_METRICS = ",".join([
-    Metric.PIECEWISE.value,
-    Metric.FULL_3D.value,
-])
+DEFAULT_METRICS = ",".join([Metric.FULL_3D.value])
 
 # Can be enabled to get postprocessed and real-time tracks plot in the same figures.
 # Usually it gets too cluttered to make sense of.
