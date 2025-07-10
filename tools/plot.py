@@ -94,7 +94,9 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
         if metricSet == m.value:
             s += "{:.3g}".format(metrics)
             if not short:
-                s += " -- [rel] {}".format(metricSet)
+                s += " --"
+                if relative: s += " [rel],"
+                s += " {}".format(metricSet)
             return s
 
     if isinstance(metrics, float):
@@ -108,7 +110,9 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             else:
                 s += ", N/A"
         if not short:
-            s += " -- [rel RMSE] RMSE"
+            s += " --"
+            if relative: s += " [rel RMSE],"
+            s += " RMSE"
             for p in PERCENTILES:
                 s += ", " + percentileName(p)
     else:
@@ -120,7 +124,9 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
         s += "{} ({})".format(mean, submetrics)
         if not short:
             legend = " | ".join([x for x in keys])
-            s += " -- [rel mean] mean, ({})".format(legend)
+            s += " --"
+            if relative: s += " [rel mean],"
+            s += " mean, ({})".format(legend)
     return s
 
 def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
