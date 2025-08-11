@@ -514,7 +514,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
 
     # Title for aggregate plot.
-    if not args.caseName:
+    if args.simplePlot:
+        plt.tight_layout(rect=[0, 0, 1, 1])
+    elif not args.caseName:
         suptitle = ""
         if "set" in sharedInfo and "methodName" in sharedInfo:
             suptitle += "{} - {}\n".format(sharedInfo["set"], sharedInfo["methodName"])
@@ -528,8 +530,6 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False)
         figure.suptitle(suptitle, fontsize=20)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    elif args.simplePlot:
-        plt.tight_layout(rect=[0, 0, 1, 1])
 
     if args.showPlot:
         plt.show()
