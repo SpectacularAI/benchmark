@@ -221,7 +221,7 @@ def preComputeAlignedVelocity(vio, gt, intervalSeconds=None):
 # If intervalSeconds is provided, the data is sampled at that rate to compute velocity from position
 # despite how high frequency it is, to prevent small delta time cause inaccuracies in velocity
 def computeVelocity(data, intervalSeconds=None):
-    FILTER_SPIKES = True
+    FILTER_SPIKES = False # Needs smarter algorithm if enabled.
     USE_PRECOMPUTED_VELOCITIES = True
     if USE_PRECOMPUTED_VELOCITIES and "velocity" in data and data["velocity"].shape[0] > 0:
         return data["velocity"]
