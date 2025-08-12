@@ -129,7 +129,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " mean, ({})".format(legend)
     return s
 
-def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
+def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, caseCount=None):
     data = [vio]
     if len(tracks) >= 1:
         gt = tracks[0]
@@ -137,13 +137,15 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
         data.append({ "name": gt["name"], "velocity": gtV })
     t0 = None
     for d in data:
-        if d["velocity"].size == 0: continue
+        if "velocity" not in d or d["velocity"].size == 0: continue
         if not t0: t0 = d["velocity"][0, 0]
         vs = d["velocity"].copy()
         vs[:, 0] -= t0
 
         # Plot only part to keep the plot legible.
-        vs = vs[vs[:, 0] < 180, :]
+        vs = vs[vs[:, 0] >= 0, :]
+        limit = 1200 if caseCount == 1 else 180
+        vs = vs[vs[:, 0] < limit, :]
 
         if vs.size == 0: continue
         if speed:
@@ -355,7 +357,16 @@ def plotResets(track, axis, ax1, ax2):
 # Returns inches. Multiplying with the `dpi=100` argument of `savefig()` gives the saved image resolution.
 def figureSize(rows, columns, square, metricSet):
     # Wide plots.
-    if rows == 1 and columns == 1 and metricSet == Metric.GLOBAL_ERROR_OVER_TIME.value:
+    if rows == 1 and columns == 1 and metricSet in [
+        Metric.VELOCITY.value,
+        Metric.GLOBAL_VELOCITY.value,
+        Metric.ANGULAR_VELOCITY.value,
+        Metric.ORIENTATION.value,
+        Metric.ORIENTATION_FULL.value,
+        Metric.ORIENTATION_ALIGNED.value,
+        Metric.TRACKING_QUALITY.value,
+        Metric.GLOBAL_ERROR_OVER_TIME.value,
+    ]:
         return (24, 13.5)
 
     if square:
@@ -456,7 +467,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             elif metricSet == Metric.VELOCITY.value:
                 plotVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif metricSet == Metric.GLOBAL_VELOCITY.value:
-                plotGlobalVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
+                plotGlobalVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis, caseCount=caseCount)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
