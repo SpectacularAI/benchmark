@@ -25,6 +25,7 @@ EXTERNAL_COLORS = {
     'gps': 'darkred',
     'rtkgps': 'salmon',
     'externalpose': 'salmon',
+    'vio positions': 'darkgreen',
 }
 
 def getColor(datasetName="ours", index=0):
@@ -131,10 +132,18 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
 
 def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, caseCount=None):
     data = [vio]
+
+    INCLUDE_VIO_POSITION_BASED_VELOCITY = caseCount == 1
+    if INCLUDE_VIO_POSITION_BASED_VELOCITY:
+        vioPositionSampleInterval = 2.0
+        vioV = computeVelocity(vio, vioPositionSampleInterval, False)
+        data.append({ "name": "VIO positions", "velocity": vioV })
+
     if len(tracks) >= 1:
         gt = tracks[0]
         gtV = computeVelocity(gt, sampleIntervalForVelocity)
         data.append({ "name": gt["name"], "velocity": gtV })
+
     t0 = None
     for d in data:
         if "velocity" not in d or d["velocity"].size == 0: continue
@@ -144,7 +153,7 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
 
         # Plot only part to keep the plot legible.
         vs = vs[vs[:, 0] >= 0, :]
-        limit = 1200 if caseCount == 1 else 180
+        limit = 1200 if caseCount == 1 else 240
         vs = vs[vs[:, 0] < limit, :]
 
         if vs.size == 0: continue
