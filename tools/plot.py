@@ -130,10 +130,27 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " mean, ({})".format(legend)
     return s
 
+def colorByGlobalStatus(axis, globalStatus, maxTime=None):
+    seen = set()
+    for i in range(len(globalStatus) - 1):
+        s = globalStatus[i][1]
+        if s == "VIO": facecolor = "gray"
+        elif s == "GNSS": facecolor = "red"
+        elif s == "VPS": facecolor = "blue"
+        else:
+            assert(s == None)
+            continue
+        t0 = globalStatus[i][0]
+        t1 = globalStatus[i + 1][0]
+        if maxTime is not None and t1 > maxTime: t1 = maxTime
+        label = None if s in seen else f"Status: {s}"
+        seen.add(s)
+        axis.axvspan(t0, t1, facecolor=facecolor, alpha=0.15, label=label)
+
 def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, caseCount=None):
     data = [vio]
 
-    INCLUDE_VIO_POSITION_BASED_VELOCITY = caseCount == 1
+    INCLUDE_VIO_POSITION_BASED_VELOCITY = False
     if INCLUDE_VIO_POSITION_BASED_VELOCITY:
         vioPositionSampleInterval = 2.0
         vioV = computeVelocity(vio, vioPositionSampleInterval, False)
@@ -144,17 +161,16 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
         gtV = computeVelocity(gt, sampleIntervalForVelocity)
         data.append({ "name": gt["name"], "velocity": gtV })
 
+    limit = 1200 if caseCount == 1 else 240
     t0 = None
     for d in data:
         if "velocity" not in d or d["velocity"].size == 0: continue
         if not t0: t0 = d["velocity"][0, 0]
         vs = d["velocity"].copy()
-        vs[:, 0] -= t0
 
         # Plot only part to keep the plot legible.
-        vs = vs[vs[:, 0] >= 0, :]
-        limit = 1200 if caseCount == 1 else 240
-        vs = vs[vs[:, 0] < limit, :]
+        vs = vs[vs[:, 0] >= t0, :]
+        vs = vs[vs[:, 0] < t0 + limit, :]
 
         if vs.size == 0: continue
         if speed:
@@ -165,6 +181,10 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
                 label = d['name'] if ind == 1 else None
                 axis.plot(vs[:, 0], vs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
+
+    COLOR_BY_GLOBAL_STATUS = True
+    if COLOR_BY_GLOBAL_STATUS:
+        colorByGlobalStatus(axis, vio["globalStatus"], maxTime=(limit + t0))
 
 def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     if len(tracks) >= 1:
