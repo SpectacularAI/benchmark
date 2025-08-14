@@ -193,7 +193,7 @@ def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
 
 def computeGlobalVelocityMetric(vio, gt, intervalSeconds=None):
     if "velocity" not in vio: return None
-    gtV = computeVelocity(gt, intervalSeconds)
+    gtV = computeVelocity(gt, intervalSeconds, filterZeroVelocities=True)
     vioPart, gtPart = getOverlap(vio["velocity"], gtV)
     if gtPart.size == 0 or vioPart.size == 0: return None
     return rmse(gtPart, vioPart)
@@ -208,7 +208,7 @@ def computeVelocityMetric(vio, gt, intervalSeconds=None):
 def preComputeAlignedVelocity(vio, gt, intervalSeconds=None):
     if "alignedVelocity" in vio and "alignedVelocity" in gt: return
     vioV = computeVelocity(vio, intervalSeconds)
-    gtV = computeVelocity(gt, intervalSeconds)
+    gtV = computeVelocity(gt, intervalSeconds, filterZeroVelocities=True)
     # vioVAligned, _ = align(vioV, gtV, -1, fix_origin=False, align3d=True, fix_scale=True, origin_zero=True)
     # vioVAligned = alignWithTrackRotation(vioV, vio["position"], gt["position"])
     vioVAligned = np.copy(vioV)
@@ -220,7 +220,7 @@ def preComputeAlignedVelocity(vio, gt, intervalSeconds=None):
 
 # If intervalSeconds is provided, the data is sampled at that rate to compute velocity from position
 # despite how high frequency it is, to prevent small delta time cause inaccuracies in velocity
-def computeVelocity(data, intervalSeconds=None, usePrecomputedVelocities=True):
+def computeVelocity(data, intervalSeconds=None, usePrecomputedVelocities=True, filterZeroVelocities=False):
     FILTER_SPIKES = False # Needs smarter algorithm if enabled.
     if usePrecomputedVelocities and "velocity" in data and data["velocity"].shape[0] > 0:
         return data["velocity"]
@@ -243,6 +243,9 @@ def computeVelocity(data, intervalSeconds=None, usePrecomputedVelocities=True):
         dt = p[i + 1, 0] - p[i - 1, 0]
         if dt <= 0: continue
         dp = p[i + 1, 1:] - p[i - 1, 1:]
+        # Possibly quite a common issue in various ground truth sources, but should not filter for VIO.
+        if filterZeroVelocities and not np.any(dp): continue
+
         v = dp / dt
         if FILTER_SPIKES and np.linalg.norm(v) > 50.: continue
         vs.append([p[i, 0], v[0], v[1], v[2]])

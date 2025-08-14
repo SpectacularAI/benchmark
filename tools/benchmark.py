@@ -335,7 +335,13 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "orientation": obj["globalPose"]["orientation"],
             "velocity": obj["globalPose"]["velocity"],
             "status": obj["status"],
+            "globalPose": {
+                "status": obj["globalPose"]["status"],
+            },
         }
+        if "status" in obj["globalPose"]:
+            gobj["globalPose"]["status"] = obj["globalPose"]["status"]
+
         outputGlobalFile.write(json.dumps(gobj, separators=(',', ':')))
         outputGlobalFile.write("\n")
 

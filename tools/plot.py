@@ -130,31 +130,49 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " mean, ({})".format(legend)
     return s
 
+def colorByGlobalStatus(axis, globalStatus, maxTime=None):
+    seen = set()
+    for i in range(len(globalStatus) - 1):
+        s = globalStatus[i][1]
+        if s == "VIO": facecolor = "gray"
+        elif s == "GNSS": facecolor = "red"
+        elif s == "VPS": facecolor = "blue"
+        else:
+            assert(s == None)
+            continue
+        t0 = globalStatus[i][0]
+        t1 = globalStatus[i + 1][0]
+        if maxTime is not None:
+            if t0 >= maxTime: break
+            if t1 > maxTime: t1 = maxTime
+        label = None if s in seen else f"Status: {s}"
+        seen.add(s)
+        axis.axvspan(t0, t1, facecolor=facecolor, alpha=0.15, label=label)
+
 def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, caseCount=None):
     data = [vio]
 
-    INCLUDE_VIO_POSITION_BASED_VELOCITY = caseCount == 1
+    INCLUDE_VIO_POSITION_BASED_VELOCITY = False
     if INCLUDE_VIO_POSITION_BASED_VELOCITY:
         vioPositionSampleInterval = 2.0
-        vioV = computeVelocity(vio, vioPositionSampleInterval, False)
+        vioV = computeVelocity(vio, intervalSeconds=vioPositionSampleInterval, usePrecomputedVelocities=False)
         data.append({ "name": "VIO positions", "velocity": vioV })
 
     if len(tracks) >= 1:
         gt = tracks[0]
-        gtV = computeVelocity(gt, sampleIntervalForVelocity)
+        gtV = computeVelocity(gt, intervalSeconds=sampleIntervalForVelocity, filterZeroVelocities=True)
         data.append({ "name": gt["name"], "velocity": gtV })
 
+    limit = 1200 if caseCount == 1 else 240
     t0 = None
     for d in data:
         if "velocity" not in d or d["velocity"].size == 0: continue
         if not t0: t0 = d["velocity"][0, 0]
         vs = d["velocity"].copy()
-        vs[:, 0] -= t0
 
         # Plot only part to keep the plot legible.
-        vs = vs[vs[:, 0] >= 0, :]
-        limit = 1200 if caseCount == 1 else 240
-        vs = vs[vs[:, 0] < limit, :]
+        vs = vs[vs[:, 0] >= t0, :]
+        vs = vs[vs[:, 0] < t0 + limit, :]
 
         if vs.size == 0: continue
         if speed:
@@ -166,12 +184,16 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
                 axis.plot(vs[:, 0], vs[:, ind], label=label,
                     color=getColor(d['name']), linewidth=1)
 
+    COLOR_BY_GLOBAL_STATUS = True
+    if COLOR_BY_GLOBAL_STATUS and "globalStatus" in vio:
+        colorByGlobalStatus(axis, vio["globalStatus"], maxTime=(limit + t0))
+
 def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     if len(tracks) >= 1:
         preComputeAlignedVelocity(vio, tracks[0], sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["velocity"] = computeVelocity(vio, sampleIntervalForVelocity)
+        vio["velocity"] = computeVelocity(vio, intervalSeconds=sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
@@ -246,6 +268,7 @@ def plotPredictionError(vio, axis, predictSeconds):
 
 def plotTrackingQuality(vio, axis, metrics):
     axis.set_ylim([-0.05, 1.05])
+    if vio["trackingQuality"].size == 0: return
     axis.plot(vio["trackingQuality"][:, 0], vio["trackingQuality"][:, 1], label="tracking quality")
 
     if metrics is not None and "pose_trail_3d" in metrics and "1.0s-segments" in metrics["pose_trail_3d"]:
@@ -459,6 +482,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             postprocessed = metricSet == Metric.POSTPROCESSED.value
             vioTrackKind = metricToTrackKind(Metric(metricSet))
             vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, vioTrackKind, getPoseTrails)
+            if vio is None: continue
 
             sampleIntervalForVelocity = None
             if "sampleIntervalForVelocity" in caseInfo:

@@ -47,7 +47,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
 
     outputPath = "{}/vio-output/{}{}.jsonl".format(benchmarkFolder, caseName, fileStem)
     if not pathlib.Path(outputPath).exists():
-        return {}
+        return None
 
     def isValidVector(row, field):
         if field not in row: return False
@@ -77,6 +77,11 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
     trackingQuality = []
     poseTrails = []
     velocityCovariances = []
+    status = []
+    lastStatus = None
+    globalStatus = []
+    lastGlobalStatus = "INVALID"
+    t = None
     with open(outputPath) as f:
         for line in f.readlines():
             row = json.loads(line)
@@ -108,8 +113,6 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
                     if not loopClosureId in idToTime: continue
                     # Save times rather than indices as they survive the align operations better.
                     loopClosures.append((t, idToTime[loopClosureId], loopClosureLinkColor))
-            if "status" in row:
-                if row["status"] == "LOST_TRACKING": resets.append(t)
             if "trackingQuality" in row:
                 trackingQuality.append([t, row["trackingQuality"]])
             if "velocityCovariance" in row and getPoseTrails:
@@ -130,6 +133,23 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
                 baa.append([t, a["x"], a["y"], a["z"]])
                 g = row["biasMean"]["gyroscopeAdditive"]
                 bga.append([t, g["x"], g["y"], g["z"]])
+            if "status" in row:
+                s = row["status"]
+                if s != lastStatus:
+                    lastStatus = s
+                    status.append([t, s])
+                if s == "LOST_TRACKING": resets.append(t)
+
+            # Track also when the `globalPose` field is missing.
+            s = None
+            if "globalPose" in row and "status" in row["globalPose"]:
+                s = row["globalPose"]["status"]
+            if s != lastGlobalStatus:
+                lastGlobalStatus = s
+                globalStatus.append([t, s])
+
+    if t is not None:
+        globalStatus.append([t, None])
 
     VIO_OUTPUT_CACHE[key] = {
         'position': np.array(position),
@@ -145,6 +165,8 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
         'biasGyroscopeAdditive': np.array(bga),
         'biasAccelerometerAdditive': np.array(baa),
         'velocityCovariances': velocityCovariances,
+        'status': np.array(status),
+        'globalStatus': np.array(globalStatus),
     }
     return VIO_OUTPUT_CACHE[key].copy()
 
