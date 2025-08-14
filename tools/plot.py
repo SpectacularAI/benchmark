@@ -266,6 +266,7 @@ def plotPredictionError(vio, axis, predictSeconds):
 
 def plotTrackingQuality(vio, axis, metrics):
     axis.set_ylim([-0.05, 1.05])
+    if vio["trackingQuality"].size == 0: return
     axis.plot(vio["trackingQuality"][:, 0], vio["trackingQuality"][:, 1], label="tracking quality")
 
     if metrics is not None and "pose_trail_3d" in metrics and "1.0s-segments" in metrics["pose_trail_3d"]:
