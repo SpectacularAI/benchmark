@@ -185,7 +185,7 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
                     color=getColor(d['name']), linewidth=1)
 
     COLOR_BY_GLOBAL_STATUS = True
-    if COLOR_BY_GLOBAL_STATUS:
+    if COLOR_BY_GLOBAL_STATUS and "globalStatus" in vio:
         colorByGlobalStatus(axis, vio["globalStatus"], maxTime=(limit + t0))
 
 def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
@@ -482,6 +482,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             postprocessed = metricSet == Metric.POSTPROCESSED.value
             vioTrackKind = metricToTrackKind(Metric(metricSet))
             vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, vioTrackKind, getPoseTrails)
+            if vio is None: continue
 
             sampleIntervalForVelocity = None
             if "sampleIntervalForVelocity" in caseInfo:

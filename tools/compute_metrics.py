@@ -183,7 +183,8 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
 
     vio = {}
     for kind in [VioTrackKind.REALTIME, VioTrackKind.POSTPROCESSED, VioTrackKind.GLOBAL]:
-        vio[kind] = readVioOutput(benchmarkFolder, caseName, info, kind, getPoseTrails=True)
+        vioOutput = readVioOutput(benchmarkFolder, caseName, info, kind, getPoseTrails=True)
+        if vioOutput: vio[kind] = vioOutput
 
     if metricSets is None: metricSets = info["metricSets"]
 

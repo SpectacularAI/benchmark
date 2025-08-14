@@ -47,7 +47,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
 
     outputPath = "{}/vio-output/{}{}.jsonl".format(benchmarkFolder, caseName, fileStem)
     if not pathlib.Path(outputPath).exists():
-        return {}
+        return None
 
     def isValidVector(row, field):
         if field not in row: return False
