@@ -153,12 +153,12 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
     INCLUDE_VIO_POSITION_BASED_VELOCITY = False
     if INCLUDE_VIO_POSITION_BASED_VELOCITY:
         vioPositionSampleInterval = 2.0
-        vioV = computeVelocity(vio, vioPositionSampleInterval, False)
+        vioV = computeVelocity(vio, intervalSeconds=vioPositionSampleInterval, usePrecomputedVelocities=False)
         data.append({ "name": "VIO positions", "velocity": vioV })
 
     if len(tracks) >= 1:
         gt = tracks[0]
-        gtV = computeVelocity(gt, sampleIntervalForVelocity)
+        gtV = computeVelocity(gt, intervalSeconds=sampleIntervalForVelocity, filterZeroVelocities=True)
         data.append({ "name": gt["name"], "velocity": gtV })
 
     limit = 1200 if caseCount == 1 else 240
@@ -191,7 +191,7 @@ def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
         preComputeAlignedVelocity(vio, tracks[0], sampleIntervalForVelocity)
         data = [tracks[0], vio]
     else:
-        vio["velocity"] = computeVelocity(vio, sampleIntervalForVelocity)
+        vio["velocity"] = computeVelocity(vio, intervalSeconds=sampleIntervalForVelocity)
         data = [vio]
     t0 = None
     for d in data:
