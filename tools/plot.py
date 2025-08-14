@@ -142,7 +142,9 @@ def colorByGlobalStatus(axis, globalStatus, maxTime=None):
             continue
         t0 = globalStatus[i][0]
         t1 = globalStatus[i + 1][0]
-        if maxTime is not None and t1 > maxTime: t1 = maxTime
+        if maxTime is not None:
+            if t0 >= maxTime: break
+            if t1 > maxTime: t1 = maxTime
         label = None if s in seen else f"Status: {s}"
         seen.add(s)
         axis.axvspan(t0, t1, facecolor=facecolor, alpha=0.15, label=label)
