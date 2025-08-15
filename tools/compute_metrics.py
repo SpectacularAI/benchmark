@@ -14,15 +14,7 @@ GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
 def computeMetricSets(vioAll, gt, info, metricSets):
-    if not VioTrackKind.REALTIME in vioAll:
-        return {}
-    vio = vioAll[VioTrackKind.REALTIME]
-    pVio = vio["position"]
     pGt = gt["position"]
-    if pVio.size > 0 and pGt.size > 0 and (pVio[0, 0] > pGt[-1, 0] or pVio[-1, 0] < pGt[0, 0]):
-        print("{}: VIO timestamps do not overlap with ground truth, cannot compute metrics or align."
-            .format(info["caseName"]))
-
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
     poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
     sampleIntervalForVelocity = info["sampleIntervalForVelocity"] if "sampleIntervalForVelocity" in info else None
@@ -30,6 +22,13 @@ def computeMetricSets(vioAll, gt, info, metricSets):
     metrics = {}
     for metricSetStr in metricSets:
         metricSet = Metric(metricSetStr)
+        vioTrackKind = metricToTrackKind(metricSet)
+        if not vioTrackKind in vioAll: continue
+        vio = vioAll[vioTrackKind]
+
+        if not "position" in vio: continue
+        pVio = vio["position"]
+
         if metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
             measureZError = metricSet != Metric.PIECEWISE_NO_Z
             m = {
@@ -68,14 +67,10 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.ANGULAR_VELOCITY:
             metrics[metricSetStr] = computeAngularVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.POSTPROCESSED:
-            if not VioTrackKind.POSTPROCESSED in vioAll: continue
-            vioPostprocessed = vioAll[VioTrackKind.POSTPROCESSED]
-            if not "position" in vioPostprocessed: continue
             # Note that compared to the other metrics, the order of arguments is swapped
             # so that the (sparse) time grid of postprocessed VIO is used.
-            alignedGt, _ = align(pGt, vioPostprocessed["position"], -1,
-                fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
-            alignedGt, unalignedVio = getOverlap(alignedGt, vioPostprocessed["position"])
+            alignedGt, _ = align(pGt, pVio, -1, fix_origin=fixOrigin, **metricSetToAlignmentParams(metricSet))
+            alignedGt, unalignedVio = getOverlap(alignedGt, pVio)
             if alignedGt.size > 0 and unalignedVio.size > 0:
                 metrics[metricSetStr] = rmse(alignedGt, unalignedVio)
             else:
@@ -92,12 +87,11 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.PREDICTION:
             metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
         elif metricSet == Metric.TRACKING_QUALITY:
-            metrics[metricSetStr] = None # TODO
+            metrics[metricSetStr] = None # Could implement something.
+        elif metricSet == Metric.GLOBAL_COVARIANCE:
+            metrics[metricSetStr] = None # Could implement something.
         elif metricSet == Metric.GLOBAL:
-            if not VioTrackKind.GLOBAL in vioAll: continue
-            vioGlobal = vioAll[VioTrackKind.GLOBAL]
-            if not "position" in vioGlobal: continue
-            overlapVio, overlapGt, overlapT = getOverlap(vioGlobal["position"], pGt, includeTime=True)
+            overlapVio, overlapGt, overlapT = getOverlap(pVio, pGt, includeTime=True)
             metrics[metricSetStr] = None
             if overlapVio.size <= 0 or overlapGt.size <= 0: continue
             overlapGtWithTime = np.hstack((overlapT.reshape(-1, 1), overlapGt))
@@ -110,13 +104,12 @@ def computeMetricSets(vioAll, gt, info, metricSets):
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         elif metricSet == Metric.GLOBAL_VELOCITY:
-            if not VioTrackKind.GLOBAL in vioAll: continue
-            vioGlobal = vioAll[VioTrackKind.GLOBAL]
-            metrics[metricSetStr] = computeGlobalVelocityMetric(vioGlobal, gt, sampleIntervalForVelocity)
+            metrics[metricSetStr] = computeGlobalVelocityMetric(vio, gt, sampleIntervalForVelocity)
         elif metricSet == Metric.GLOBAL_ERROR_OVER_TIME:
             pass # Plot only.
         else:
             raise Exception("Unimplemented metric {}".format(metricSetStr))
+
     return metrics
 
 # Compute a single value that summarises the results, based on preference order

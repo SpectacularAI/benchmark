@@ -266,6 +266,9 @@ def plotPredictionError(vio, axis, predictSeconds):
     axis.set_ylabel('Position (mm)', color='teal', fontweight='bold')
     ax2.set_ylabel('Orientation (°)', color='orange', fontweight='bold')
 
+def plotGlobalCovariance(vio, z_axis):
+    pass
+
 def plotTrackingQuality(vio, axis, metrics):
     axis.set_ylim([-0.05, 1.05])
     if vio["trackingQuality"].size == 0: return
@@ -389,16 +392,7 @@ def plotResets(track, axis, ax1, ax2):
 # Returns inches. Multiplying with the `dpi=100` argument of `savefig()` gives the saved image resolution.
 def figureSize(rows, columns, square, metricSet):
     # Wide plots.
-    if rows == 1 and columns == 1 and metricSet in [
-        Metric.VELOCITY.value,
-        Metric.GLOBAL_VELOCITY.value,
-        Metric.ANGULAR_VELOCITY.value,
-        Metric.ORIENTATION.value,
-        Metric.ORIENTATION_FULL.value,
-        Metric.ORIENTATION_ALIGNED.value,
-        Metric.TRACKING_QUALITY.value,
-        Metric.GLOBAL_ERROR_OVER_TIME.value,
-    ]:
+    if rows == 1 and columns == 1 and metricHorizontalAxisIsTime(Metric(metricSet)):
         return (24, 13.5)
 
     if square:
@@ -522,7 +516,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 if len(tracks) >= 1:
                     plotErrorOverTime(tracks[0], vio, plotAxis, args.z_axis, includeLegend)
                     includeLegend = True
+            elif metricSet == Metric.GLOBAL_COVARIANCE.value:
+                plotGlobalCovariance(vio, args.z_axis)
             else:
+                # Also for metrics with no plot of their own, show the 2d trajectory.
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
                 plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
@@ -601,9 +598,7 @@ def plotBenchmark(args, benchmarkFolder):
         metricSets = sharedInfo["metricSets"]
 
     for metricSet in metricSets:
-        # TODO Plotting is somewhat slow. Could skip eg for CPU_TIME if there
-        # was some other convenient way to present the results besides the aggregate figure.
-        if args.z_axis and metricSet in [Metric.ORIENTATION.value, Metric.ORIENTATION_FULL.value, Metric.ORIENTATION_ALIGNED.value, Metric.PREDICTION.value, Metric.TRACKING_QUALITY.value]:
+        if args.z_axis and not metricHasZAxisVisualization(Metric(metricSet)):
             continue
         plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet)
 
