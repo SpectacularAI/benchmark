@@ -92,7 +92,9 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.PREDICTION:
             metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
         elif metricSet == Metric.TRACKING_QUALITY:
-            metrics[metricSetStr] = None # TODO
+            metrics[metricSetStr] = None # Could implement something.
+        elif metricSet == Metric.GLOBAL_COVARIANCE:
+            metrics[metricSetStr] = None # Could implement something.
         elif metricSet == Metric.GLOBAL:
             if not VioTrackKind.GLOBAL in vioAll: continue
             vioGlobal = vioAll[VioTrackKind.GLOBAL]

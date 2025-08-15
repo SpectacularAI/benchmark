@@ -46,6 +46,8 @@ class Metric(Enum):
     FULL_3D = "full_3d"
     # Sometimes used in academic benchmarks for monocular visual-only methods.
     FULL_3D_SCALED = "full_sim3"
+    # Like `FULL`, but for sparse postprocessed output, eg our VIO's SLAM map keyframes.
+    POSTPROCESSED = "postprocessed"
     # Like `FULL`, but cuts the track into segments and aligns each individually.
     PIECEWISE = "piecewise"
     # Like `PIECEWISE`, but does not penalize drift in z direction.
@@ -55,18 +57,14 @@ class Metric(Enum):
     # Not implemented, but this would be like POSE_TRAIL_3D where the orientation is aligned only around gravity.
     # POSE_TRAIL = "pose_trail"
 
-    # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
-    COVERAGE = "coverage"
+    # Graphs where the x-axis is time.
+    #
     # RMSE of aligned angular velocities. May be computed from orientations if not available in the data.
     ANGULAR_VELOCITY = "angular_velocity"
     # RMSE of aligned velocities. May be computed from positions if not available in the data.
     VELOCITY = "velocity"
     # Like VELOCITY but with WGS velocities without alignment.
     GLOBAL_VELOCITY = "global_velocity"
-    # Like `FULL`, but for sparse postprocessed output, eg our VIO's SLAM map keyframes.
-    POSTPROCESSED = "postprocessed"
-    # Output from UNIX `time` command (not wall time).
-    CPU_TIME = "cpu_time"
     # Orientation error
     ORIENTATION = "orientation"
     # Orientation error, including error split by gravity and heading
@@ -75,16 +73,26 @@ class Metric(Enum):
     ORIENTATION_ALIGNED = "orientation_aligned"
     # Error when predicting position and orientation forward in time
     PREDICTION = "prediction"
-    # Correlation of VIO tracking quality estimate to momentary tracking accuracy.
-    TRACKING_QUALITY = "tracking_quality"
-
     # A plot of RMSE over time, together with altitude.
     GLOBAL_ERROR_OVER_TIME = "global_error_over_time"
+    # Quality estimation metrics.
+    #
+    # Correlation of VIO tracking quality estimate to momentary tracking accuracy.
+    TRACKING_QUALITY = "tracking_quality"
+    # Measure of global position error being within the estimated uncertainty range.
+    GLOBAL_COVARIANCE = "global_covariance"
+
+    # Misc metrics.
+    #
+    # Number in [0, 1] that indicates how large portion of the ground truth the VIO track covers.
+    COVERAGE = "coverage"
+    # Output from UNIX `time` command (not wall time).
+    CPU_TIME = "cpu_time"
 
 def metricToTrackKind(metricSet):
     if metricSet == Metric.POSTPROCESSED:
         return VioTrackKind.POSTPROCESSED
-    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY, Metric.GLOBAL_ERROR_OVER_TIME]:
+    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY, Metric.GLOBAL_ERROR_OVER_TIME, Metric.GLOBAL_COVARIANCE]:
         return VioTrackKind.GLOBAL
     return VioTrackKind.REALTIME
 
@@ -103,10 +111,30 @@ def metricSetToAlignmentParams(metricSet):
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
-    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME]:
+    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME, Metric.GLOBAL_COVARIANCE]:
         return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
+
+def metricHasZAxisVisualization(metricSet):
+    if metricSet in [
+        Metric.NO_ALIGN,
+        Metric.GLOBAL,
+        Metric.FULL,
+        Metric.FULL_3D,
+        Metric.FULL_3D_SCALED,
+        Metric.POSTPROCESSED,
+        Metric.PIECEWISE,
+        Metric.PIECEWISE_NO_Z,
+        Metric.POSE_TRAIL_3D,
+        Metric.ANGULAR_VELOCITY,
+        Metric.VELOCITY,
+        Metric.GLOBAL_VELOCITY,
+        Metric.GLOBAL_COVARIANCE,
+        Metric.GLOBAL_ERROR_OVER_TIME,
+    ]:
+        return True
+    return False
 
 def metricHorizontalAxisIsTime(metricSet):
     if metricSet in [
@@ -117,6 +145,7 @@ def metricHorizontalAxisIsTime(metricSet):
         Metric.ORIENTATION_FULL,
         Metric.ORIENTATION_ALIGNED,
         Metric.TRACKING_QUALITY,
+        Metric.GLOBAL_COVARIANCE,
         Metric.GLOBAL_ERROR_OVER_TIME,
     ]:
         return True
