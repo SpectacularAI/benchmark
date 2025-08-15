@@ -108,6 +108,20 @@ def metricSetToAlignmentParams(metricSet):
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
 
+def metricHorizontalAxisIsTime(metricSet):
+    if metricSet in [
+        Metric.VELOCITY,
+        Metric.GLOBAL_VELOCITY,
+        Metric.ANGULAR_VELOCITY,
+        Metric.ORIENTATION,
+        Metric.ORIENTATION_FULL,
+        Metric.ORIENTATION_ALIGNED,
+        Metric.TRACKING_QUALITY,
+        Metric.GLOBAL_ERROR_OVER_TIME,
+    ]:
+        return True
+    return False
+
 def percentileName(p):
     if p == 100: return "max"
     if p == 50: return "median"

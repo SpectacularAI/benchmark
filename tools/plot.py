@@ -389,16 +389,7 @@ def plotResets(track, axis, ax1, ax2):
 # Returns inches. Multiplying with the `dpi=100` argument of `savefig()` gives the saved image resolution.
 def figureSize(rows, columns, square, metricSet):
     # Wide plots.
-    if rows == 1 and columns == 1 and metricSet in [
-        Metric.VELOCITY.value,
-        Metric.GLOBAL_VELOCITY.value,
-        Metric.ANGULAR_VELOCITY.value,
-        Metric.ORIENTATION.value,
-        Metric.ORIENTATION_FULL.value,
-        Metric.ORIENTATION_ALIGNED.value,
-        Metric.TRACKING_QUALITY.value,
-        Metric.GLOBAL_ERROR_OVER_TIME.value,
-    ]:
+    if rows == 1 and columns == 1 and metricHorizontalAxisIsTime(Metric(metricSet)):
         return (24, 13.5)
 
     if square:
