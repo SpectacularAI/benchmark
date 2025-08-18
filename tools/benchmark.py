@@ -332,15 +332,13 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         gobj = {
             "time": obj["time"],
             "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
+            "positionCovariance": obj["globalPose"]["enuPositionCovariance"],
             "orientation": obj["globalPose"]["orientation"],
             "velocity": obj["globalPose"]["velocity"],
+            "velocityCovariance": obj["globalPose"]["velocityCovariance"],
             "status": obj["status"],
-            "globalPose": {
-                "status": obj["globalPose"]["status"],
-            },
+            "globalPose": obj["globalPose"],
         }
-        if "status" in obj["globalPose"]:
-            gobj["globalPose"]["status"] = obj["globalPose"]["status"]
 
         outputGlobalFile.write(json.dumps(gobj, separators=(',', ':')))
         outputGlobalFile.write("\n")

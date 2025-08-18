@@ -234,6 +234,40 @@ def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     normalizedRmse = PIECEWISE_METRIC_SCALE * rmse(gt, interpolated) / np.sqrt(pieceLenSecs)
     return normalizedRmse
 
+def computeGlobalCovarianceData(vio, gt, z_axis):
+    assert(len(vio["positionCovariances"]) == vio["position"].shape[0])
+    t = vio["position"][:, 0].copy() # Returned out, copy.
+    quantile = 0.95
+
+    from scipy.stats import chi2
+    from scipy.spatial.distance import mahalanobis
+    if z_axis:
+        pGt = np.interp(t, gt["position"][:, 0], gt["position"][:, 3])
+        pVio = vio["position"][:, 3]
+        ppfValue = chi2.ppf(q=quantile, df=1)
+        ps = pVio - pGt
+        err = np.abs(ps)
+        def uncertainty(p, cov):
+            return mahalanobis([p], [0], 1 / cov[2, 2])
+    else:
+        pGt = np.hstack([np.interp(t, gt["position"][:, 0], gt["position"][:, i]).reshape(-1, 1) for i in range(1, 3)])
+        pVio = vio["position"][:, 1:3]
+        p = pVio - pGt
+        ppfValue = chi2.ppf(q=quantile, df=2)
+        err = np.linalg.norm(pVio[:, :2] - pGt[:, :2], axis=1)
+        def uncertainty(p, cov):
+            invCov = np.linalg.inv(cov[:2, :2])
+            return mahalanobis(p, np.array([0, 0]), invCov)
+        ps = [row for row in p]
+
+    m = [uncertainty(p, cov[1]) for (p, cov) in zip(ps, vio["positionCovariances"])]
+    covLimit = ppfValue / m * err
+    return t, err, covLimit, quantile
+
+def computeGlobalCovarianceMetric(vio, gt, z_axis):
+    _, err, covLimit, _ = computeGlobalCovarianceData(vio, gt, z_axis)
+    return np.sum(err < covLimit) / len(err)
+
 def computeGlobalVelocityMetric(vio, gt, intervalSeconds=None):
     if "velocity" not in vio: return None
     gtV = computeVelocity(gt, intervalSeconds, filterZeroVelocities=True)

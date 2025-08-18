@@ -89,7 +89,10 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.TRACKING_QUALITY:
             metrics[metricSetStr] = None # Could implement something.
         elif metricSet == Metric.GLOBAL_COVARIANCE:
-            metrics[metricSetStr] = None # Could implement something.
+            metrics[metricSetStr] = {
+                "xy": computeGlobalCovarianceMetric(vio, gt, False),
+                "z": computeGlobalCovarianceMetric(vio, gt, True),
+            }
         elif metricSet == Metric.GLOBAL:
             overlapVio, overlapGt, overlapT = getOverlap(pVio, pGt, includeTime=True)
             metrics[metricSetStr] = None
