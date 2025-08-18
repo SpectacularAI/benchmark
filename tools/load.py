@@ -76,6 +76,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
     resets = []
     trackingQuality = []
     poseTrails = []
+    positionCovariances = []
     velocityCovariances = []
     status = []
     lastStatus = None
@@ -115,7 +116,9 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
                     loopClosures.append((t, idToTime[loopClosureId], loopClosureLinkColor))
             if "trackingQuality" in row:
                 trackingQuality.append([t, row["trackingQuality"]])
-            if "velocityCovariance" in row and getPoseTrails:
+            if "positionCovariance" in row:
+                positionCovariances.append((t, np.array(row["positionCovariance"])))
+            if "velocityCovariance" in row:
                 velocityCovariances.append((t, np.array(row["velocityCovariance"])))
             # May be slow, get only of needed.
             if "poseTrail" in row and getPoseTrails:
@@ -164,6 +167,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
         'poseTrails': poseTrails,
         'biasGyroscopeAdditive': np.array(bga),
         'biasAccelerometerAdditive': np.array(baa),
+        'positionCovariances': positionCovariances,
         'velocityCovariances': velocityCovariances,
         'status': np.array(status),
         'globalStatus': np.array(globalStatus),

@@ -78,7 +78,7 @@ def compactRotation(data, ax1=1, ax2=2):
         ar_90_degrees = np.dot(ar, np.linalg.inv([[0, -1], [1, 0]]))
         data[:,[ax1, ax2]] = ar_90_degrees
 
-def metricsToString(metrics, metricSet, relative=None, short=True):
+def metricsToString(metrics, metricSet, relative=None, short=True, z_axis=False):
     if not metrics:
         return "N/A"
     s = ""
@@ -116,6 +116,10 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " RMSE"
             for p in PERCENTILES:
                 s += ", " + percentileName(p)
+    elif metricSet == Metric.GLOBAL_COVARIANCE.value:
+        key = "z" if z_axis else "xy"
+        s += "{:.2f}".format(metrics[key])
+        if not short: s += f" -- {metricSet} {key}"
     else:
         keys = []
         for k in metrics:
@@ -130,7 +134,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True):
             s += " mean, ({})".format(legend)
     return s
 
-def colorByGlobalStatus(axis, globalStatus, maxTime=None):
+def colorByGlobalStatus(axis, globalStatus, startTime=0, maxTime=None):
     seen = set()
     for i in range(len(globalStatus) - 1):
         s = globalStatus[i][1]
@@ -140,8 +144,8 @@ def colorByGlobalStatus(axis, globalStatus, maxTime=None):
         else:
             assert(s == None)
             continue
-        t0 = globalStatus[i][0]
-        t1 = globalStatus[i + 1][0]
+        t0 = globalStatus[i][0] - startTime
+        t1 = globalStatus[i + 1][0] - startTime
         if maxTime is not None:
             if t0 >= maxTime: break
             if t1 > maxTime: t1 = maxTime
@@ -164,15 +168,16 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
         data.append({ "name": gt["name"], "velocity": gtV })
 
     limit = 1200 if caseCount == 1 else 240
-    t0 = None
+    startTime = None
     for d in data:
         if "velocity" not in d or d["velocity"].size == 0: continue
-        if not t0: t0 = d["velocity"][0, 0]
+        if not startTime: startTime = d["velocity"][0, 0]
         vs = d["velocity"].copy()
+        vs[:, 0] -= startTime
 
         # Plot only part to keep the plot legible.
-        vs = vs[vs[:, 0] >= t0, :]
-        vs = vs[vs[:, 0] < t0 + limit, :]
+        vs = vs[vs[:, 0] >= 0, :]
+        vs = vs[vs[:, 0] < limit, :]
 
         if vs.size == 0: continue
         if speed:
@@ -186,7 +191,7 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
 
     COLOR_BY_GLOBAL_STATUS = True
     if COLOR_BY_GLOBAL_STATUS and "globalStatus" in vio:
-        colorByGlobalStatus(axis, vio["globalStatus"], maxTime=(limit + t0))
+        colorByGlobalStatus(axis, vio["globalStatus"], startTime=startTime, maxTime=limit)
 
 def plotVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False):
     if len(tracks) >= 1:
@@ -263,11 +268,30 @@ def plotPredictionError(vio, axis, predictSeconds):
     ax2 = axis.twinx()
     axis.plot(posTime, positionError * 1000, color='teal')
     ax2.plot(orientationErrors["time"], orientationErrors["total"], color='orange')
-    axis.set_ylabel('Position (mm)', color='teal', fontweight='bold')
-    ax2.set_ylabel('Orientation (°)', color='orange', fontweight='bold')
+    axis.set_ylabel('Position [mm]', color='teal', fontweight='bold')
+    ax2.set_ylabel('Orientation [°]', color='orange', fontweight='bold')
 
-def plotGlobalCovariance(vio, z_axis):
-    pass
+def plotGlobalCovariance(vio, gt, axis, z_axis, caseCount=None):
+    t, err, covLimit, quantile = computeGlobalCovarianceData(vio, gt, z_axis)
+
+    startTime = t[0]
+    t -= startTime
+    vs = np.column_stack([t, err, covLimit])
+
+    # Plot only part to keep the plot legible.
+    limit = 2500 if caseCount == 1 else 500
+    vs = vs[vs[:, 0] < limit, :]
+
+    axis.plot(vs[:, 0], vs[:, 1], label="error", color="red")
+    axis.plot(vs[:, 0], vs[:, 2], label="covariance limit {}%".format(int(100 * quantile)), color="blue")
+
+    kind = "Z" if z_axis else "XY"
+    axis.set_xlabel('Time [s]')
+    axis.set_ylabel(f'{kind} error [m]')
+
+    COLOR_BY_GLOBAL_STATUS = True
+    if COLOR_BY_GLOBAL_STATUS and "globalStatus" in vio:
+        colorByGlobalStatus(axis, vio["globalStatus"], startTime=startTime, maxTime=limit)
 
 def plotTrackingQuality(vio, axis, metrics):
     axis.set_ylim([-0.05, 1.05])
@@ -517,7 +541,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     plotErrorOverTime(tracks[0], vio, plotAxis, args.z_axis, includeLegend)
                     includeLegend = True
             elif metricSet == Metric.GLOBAL_COVARIANCE.value:
-                plotGlobalCovariance(vio, args.z_axis)
+                if len(tracks) >= 1:
+                    plotGlobalCovariance(vio, tracks[0], plotAxis, args.z_axis, caseCount=caseCount)
             else:
                 # Also for metrics with no plot of their own, show the 2d trajectory.
                 tracks.append(vio)
@@ -535,7 +560,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 if titleStr: titleStr += "\n"
                 if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
-                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True)
+                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True, z_axis=args.z_axis)
             plotAxis.title.set_text(titleStr)
 
             _, labels = plotAxis.get_legend_handles_labels()
@@ -568,7 +593,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             relativeMetric = None
             if "relative" in sharedInfo["metrics"] and sharedInfo["metrics"]["relative"] and metricSet in sharedInfo["metrics"]["relative"]:
                 relativeMetric = sharedInfo["metrics"]["relative"][metricSet]
-            suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False)
+            suptitle += metricsToString(sharedInfo["metrics"][metricSet], metricSet, relativeMetric, short=False, z_axis=args.z_axis)
         figure.suptitle(suptitle, fontsize=20)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
