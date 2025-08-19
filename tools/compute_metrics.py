@@ -90,8 +90,13 @@ def computeMetricSets(vioAll, gt, info, metricSets):
             metrics[metricSetStr] = None # Could implement something.
         elif metricSet == Metric.GLOBAL_COVARIANCE:
             metrics[metricSetStr] = {
-                "xy": computeGlobalCovarianceMetric(vio, gt, False),
-                "z": computeGlobalCovarianceMetric(vio, gt, True),
+                "xy": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=False, isVelocity=False),
+                "z": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=True, isVelocity=False),
+            }
+        elif metricSet == Metric.GLOBAL_VELOCITY_COVARIANCE:
+            metrics[metricSetStr] = {
+                "xy": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=False, isVelocity=True),
+                "z": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=True, isVelocity=True),
             }
         elif metricSet == Metric.GLOBAL:
             overlapVio, overlapGt, overlapT = getOverlap(pVio, pGt, includeTime=True)
