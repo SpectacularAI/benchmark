@@ -81,6 +81,8 @@ class Metric(Enum):
     TRACKING_QUALITY = "tracking_quality"
     # Measure of global position error being within the estimated uncertainty range.
     GLOBAL_COVARIANCE = "global_covariance"
+    # Like GLOBAL_COVARIANCE but for velocity.
+    GLOBAL_VELOCITY_COVARIANCE = "global_velocity_covariance"
 
     # Misc metrics.
     #
@@ -92,7 +94,7 @@ class Metric(Enum):
 def metricToTrackKind(metricSet):
     if metricSet == Metric.POSTPROCESSED:
         return VioTrackKind.POSTPROCESSED
-    if metricSet in [Metric.GLOBAL, Metric.GLOBAL_VELOCITY, Metric.GLOBAL_ERROR_OVER_TIME, Metric.GLOBAL_COVARIANCE]:
+    if "global" in metricSet.value:
         return VioTrackKind.GLOBAL
     return VioTrackKind.REALTIME
 
@@ -111,7 +113,7 @@ def metricSetToAlignmentParams(metricSet):
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
-    elif metricSet in [Metric.ANGULAR_VELOCITY, Metric.VELOCITY, Metric.CPU_TIME, Metric.GLOBAL_COVARIANCE]:
+    elif metricHorizontalAxisIsTime(metricSet) or metricSet in [Metric.CPU_TIME]:
         return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
@@ -131,6 +133,7 @@ def metricHasZAxisVisualization(metricSet):
         Metric.VELOCITY,
         Metric.GLOBAL_VELOCITY,
         Metric.GLOBAL_COVARIANCE,
+        Metric.GLOBAL_VELOCITY_COVARIANCE,
         Metric.GLOBAL_ERROR_OVER_TIME,
     ]:
         return True
@@ -146,6 +149,7 @@ def metricHorizontalAxisIsTime(metricSet):
         Metric.ORIENTATION_ALIGNED,
         Metric.TRACKING_QUALITY,
         Metric.GLOBAL_COVARIANCE,
+        Metric.GLOBAL_VELOCITY_COVARIANCE,
         Metric.GLOBAL_ERROR_OVER_TIME,
     ]:
         return True
@@ -234,24 +238,33 @@ def computePiecewiseMetric(out, gt, pieceLenSecs=10.0, measureZError=True):
     normalizedRmse = PIECEWISE_METRIC_SCALE * rmse(gt, interpolated) / np.sqrt(pieceLenSecs)
     return normalizedRmse
 
-def computeGlobalCovarianceData(vio, gt, z_axis):
-    assert(len(vio["positionCovariances"]) == vio["position"].shape[0])
-    t = vio["position"][:, 0].copy() # Returned out, copy.
+def computeGlobalCovarianceData(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity):
+    if isVelocity:
+        gtValues = computeVelocity(gt, sampleIntervalForVelocity, filterZeroVelocities=True)
+        vioValues = vio["velocity"]
+        vioCovariances = vio["velocityCovariances"]
+    else:
+        gtValues = gt["position"]
+        vioValues = vio["position"]
+        vioCovariances = vio["positionCovariances"]
+    assert(len(vioCovariances) == vioValues.shape[0])
+
+    t = vioValues[:, 0].copy() # Returned out, copy.
     quantile = 0.95
 
     from scipy.stats import chi2
     from scipy.spatial.distance import mahalanobis
     if z_axis:
-        pGt = np.interp(t, gt["position"][:, 0], gt["position"][:, 3])
-        pVio = vio["position"][:, 3]
+        pGt = np.interp(t, gtValues[:, 0], gtValues[:, 3])
+        pVio = vioValues[:, 3]
         ppfValue = chi2.ppf(q=quantile, df=1)
         ps = pVio - pGt
         err = np.abs(ps)
         def uncertainty(p, cov):
             return mahalanobis([p], [0], 1 / cov[2, 2])
     else:
-        pGt = np.hstack([np.interp(t, gt["position"][:, 0], gt["position"][:, i]).reshape(-1, 1) for i in range(1, 3)])
-        pVio = vio["position"][:, 1:3]
+        pGt = np.hstack([np.interp(t, gtValues[:, 0], gtValues[:, i]).reshape(-1, 1) for i in range(1, 3)])
+        pVio = vioValues[:, 1:3]
         p = pVio - pGt
         ppfValue = chi2.ppf(q=quantile, df=2)
         err = np.linalg.norm(pVio[:, :2] - pGt[:, :2], axis=1)
@@ -260,12 +273,12 @@ def computeGlobalCovarianceData(vio, gt, z_axis):
             return mahalanobis(p, np.array([0, 0]), invCov)
         ps = [row for row in p]
 
-    m = [uncertainty(p, cov[1]) for (p, cov) in zip(ps, vio["positionCovariances"])]
+    m = [uncertainty(p, cov[1]) for (p, cov) in zip(ps, vioCovariances)]
     covLimit = ppfValue / m * err
     return t, err, covLimit, quantile
 
-def computeGlobalCovarianceMetric(vio, gt, z_axis):
-    _, err, covLimit, _ = computeGlobalCovarianceData(vio, gt, z_axis)
+def computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity):
+    _, err, covLimit, _ = computeGlobalCovarianceData(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity)
     return np.sum(err < covLimit) / len(err)
 
 def computeGlobalVelocityMetric(vio, gt, intervalSeconds=None):

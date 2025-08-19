@@ -116,7 +116,7 @@ def metricsToString(metrics, metricSet, relative=None, short=True, z_axis=False)
             s += " RMSE"
             for p in PERCENTILES:
                 s += ", " + percentileName(p)
-    elif metricSet == Metric.GLOBAL_COVARIANCE.value:
+    elif metricSet in [Metric.GLOBAL_COVARIANCE.value, Metric.GLOBAL_VELOCITY_COVARIANCE.value]:
         key = "z" if z_axis else "xy"
         s += "{:.2f}".format(metrics[key])
         if not short: s += f" -- {metricSet} {key}"
@@ -271,8 +271,8 @@ def plotPredictionError(vio, axis, predictSeconds):
     axis.set_ylabel('Position [mm]', color='teal', fontweight='bold')
     ax2.set_ylabel('Orientation [°]', color='orange', fontweight='bold')
 
-def plotGlobalCovariance(vio, gt, axis, z_axis, caseCount=None):
-    t, err, covLimit, quantile = computeGlobalCovarianceData(vio, gt, z_axis)
+def plotGlobalCovariance(vio, gt, sampleIntervalForVelocity, axis, z_axis, isVelocity=False, caseCount=None):
+    t, err, covLimit, quantile = computeGlobalCovarianceData(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity)
 
     startTime = t[0]
     t -= startTime
@@ -285,9 +285,10 @@ def plotGlobalCovariance(vio, gt, axis, z_axis, caseCount=None):
     axis.plot(vs[:, 0], vs[:, 1], label="error", color="red")
     axis.plot(vs[:, 0], vs[:, 2], label="covariance limit {}%".format(int(100 * quantile)), color="blue")
 
+    unit = "m/s" if isVelocity else "m"
     kind = "Z" if z_axis else "XY"
     axis.set_xlabel('Time [s]')
-    axis.set_ylabel(f'{kind} error [m]')
+    axis.set_ylabel(f'{kind} error [{unit}]')
 
     COLOR_BY_GLOBAL_STATUS = True
     if COLOR_BY_GLOBAL_STATUS and "globalStatus" in vio:
@@ -542,7 +543,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     includeLegend = True
             elif metricSet == Metric.GLOBAL_COVARIANCE.value:
                 if len(tracks) >= 1:
-                    plotGlobalCovariance(vio, tracks[0], plotAxis, args.z_axis, caseCount=caseCount)
+                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=False, caseCount=caseCount)
+            elif metricSet == Metric.GLOBAL_VELOCITY_COVARIANCE.value:
+                if len(tracks) >= 1:
+                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=True, caseCount=caseCount)
             else:
                 # Also for metrics with no plot of their own, show the 2d trajectory.
                 tracks.append(vio)
@@ -573,6 +577,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
         except Exception as e:
             if caseCount > 1:
                 # For aggregate plots do not crash the entire plot but mark the failed case.
+                print("Exception for {}: `{}`".format(titleStr, e))
                 plotAxis.set_title("FAILED {}\n{}".format(titleStr, e), color="red")
                 continue
             else:
