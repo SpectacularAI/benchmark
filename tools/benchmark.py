@@ -188,13 +188,13 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         kind = None
         for k in TRACK_KINDS:
             if rowJson.get(k) is not None:
-                kind = k
-                pose = rowJson[kind]
+                kind = TRACK_KINDS[k]
+                pose = rowJson[k]
                 break
         if "pose" in rowJson:
             for k in TRACK_KINDS:
                 if rowJson["pose"]["name"] == k:
-                    kind = k
+                    kind = TRACK_KINDS[k]
                     pose = rowJson["pose"]
                     break
         if not kind: return
