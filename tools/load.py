@@ -5,31 +5,32 @@ import pathlib
 import numpy as np
 
 from .metric import *
+from .util import readJsonl
 
-def readDatasetsCsv(fn):
-    return [{"name": "groundTruth", "position": np.genfromtxt(fn, delimiter=',')}]
-
-def readDatasetsJson(fn, include=[], exclude=[]):
-    with open(fn) as f:
-        data = json.load(f)["datasets"]
+def readDatasetsJsonl(filePath, include=[], exclude=[]):
+    nameToInd = {}
     filteredData = []
-    for dataset in data:
-        name = dataset["name"].lower()
+    for obj in readJsonl(filePath):
+        name = obj["pose"]["name"].lower()
         if include and not name in include: continue
         if name in exclude: continue
+        if name not in nameToInd:
+            nameToInd[name] = len(filteredData)
+            filteredData.append({
+                "name": name,
+                "position": [],
+                "orientation": [],
+            })
+        ind = nameToInd[name]
+        d = obj["pose"]
+        filteredData[ind]["position"].append([obj["time"], d["position"]["x"], d["position"]["y"], d["position"]["z"]])
+        if "orientation" in d:
+            q = d["orientation"]
+            filteredData[ind]["orientation"].append([obj["time"], q["x"], q["y"], q["z"], q["w"]]) # Scipy ordering.
 
-        position = []
-        orientation = []
-        for d in dataset["data"]:
-            position.append([d["time"], d["position"]["x"], d["position"]["y"], d["position"]["z"]])
-            if "orientation" in d:
-                q = d["orientation"]
-                orientation.append([d["time"], q["x"], q["y"], q["z"], q["w"]]) # Scipy ordering.
-        filteredData.append({
-            "name": dataset["name"],
-            "position": np.array(position),
-            "orientation": np.array(orientation),
-        })
+    for data in filteredData:
+        data["position"] = np.array(data["position"])
+        data["orientation"] = np.array(data["orientation"])
     return filteredData
 
 VIO_OUTPUT_CACHE = {}
@@ -60,8 +61,6 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
 
     method = None
     if "methodName" in info: method = info["methodName"].lower()
-
-    to_arr = lambda obj: [obj["x"], obj["y"], obj["z"]]
 
     position = []
     orientation = []
@@ -185,12 +184,9 @@ def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
     key = "{}+{}+{}".format(baseName, caseName, "-".join(include))
     if key in OTHER_DATASETS_CACHE: return OTHER_DATASETS_CACHE[key].copy()
 
-    gtJson = "{}/ground-truth/{}.json".format(benchmarkFolder, caseName)
-    gtCsv = "{}/ground-truth/{}.csv".format(benchmarkFolder, caseName)
-    if os.path.isfile(gtJson):
-        OTHER_DATASETS_CACHE[key] = readDatasetsJson(gtJson, include, exclude)
-    elif os.path.isfile(gtCsv):
-        OTHER_DATASETS_CACHE[key] = readDatasetsCsv(gtCsv)
+    gtJsonl = "{}/ground-truth/{}.jsonl".format(benchmarkFolder, caseName)
+    if os.path.isfile(gtJsonl):
+        OTHER_DATASETS_CACHE[key] = readDatasetsJsonl(gtJsonl, include, exclude)
     else:
         return []
     return OTHER_DATASETS_CACHE[key].copy()

@@ -184,6 +184,7 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         from scipy.spatial.transform import Rotation
 
     def handleRow(rowJson):
+        pose = None
         kind = None
         for k in TRACK_KINDS:
             if rowJson.get(k) is not None:
@@ -197,6 +198,7 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
                     pose = rowJson["pose"]
                     break
         if not kind: return
+        assert(pose is not None)
 
         if not kind in datasets:
             datasets[kind] = []
@@ -215,11 +217,14 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
         json = {
             "time": rowJson["time"],
-            "position": { "x": dToW[0, 3], "y": dToW[1, 3], "z": dToW[2, 3] },
+            "pose": {
+                "name": kind,
+                "position": { "x": dToW[0, 3], "y": dToW[1, 3], "z": dToW[2, 3] },
+            },
         }
         if hasOrientation:
             q = Rotation.from_matrix(dToW[0:3, 0:3]).as_quat()
-            json["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
+            json["pose"]["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
         datasets[kind].append(json)
 
     if os.path.exists(casePaths["input"]):
@@ -242,7 +247,10 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
                 row = json.loads(line)
                 postprocessed.append({
                     "time": row["time"],
-                    "position": row["position"],
+                    "pose": {
+                        "name": "postprocessed",
+                        "position": row["position"],
+                    },
                 })
 
     realtime = []
@@ -252,33 +260,33 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
                 row = json.loads(line)
                 realtime.append({
                     "time": row["time"],
-                    "position": row["position"],
+                    "pose": {
+                        "name": "realtime",
+                        "position": row["position"],
+                    },
                 })
 
-    with open(casePaths["gtJson"], "w") as gtJsonFile:
-        def addDataSet(array, name, d):
-            if d: array.append({ 'name': name, 'data': d })
+    # First found data type will be used as ground truth.
+    kindsOrdered = [
+        "groundTruth",
+        "externalPose",
+        "ARKit",
+        "output",
+        "realsense",
+        "gps",
+        "rtkgps",
+    ]
+    values = []
+    for kind in kindsOrdered:
+        if not kind in datasets: continue
+        values.extend(datasets[kind])
+    values.extend(postprocessed)
+    values.extend(realtime)
 
-        # First found data type will be used as ground truth.
-        kindsOrdered = [
-            "groundTruth",
-            "externalPose",
-            "ARKit",
-            "output",
-            "realsense",
-            "gps",
-            "rtkgps",
-        ]
-        datasetsOrdered = []
-        for kind in kindsOrdered:
-            if not kind in datasets: continue
-            addDataSet(datasetsOrdered, TRACK_KINDS[kind], datasets[kind])
-
-        if COMPARE_POSTPROCESSED:
-            addDataSet(datasetsOrdered, "postprocessed", postprocessed)
-            addDataSet(datasetsOrdered, "realtime", realtime)
-
-        json.dump({'datasets': datasetsOrdered}, gtJsonFile)
+    with open(casePaths["gtJsonl"], "w") as f:
+        for obj in values:
+            f.write(json.dumps(obj, separators=(',', ':')))
+            f.write("\n")
 
     return frameCount
 
@@ -293,7 +301,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         "outputMap": "{}/{}_map.jsonl".format(dirs.out, caseName),
         "outputRealtime": "{}/{}_realtime.jsonl".format(dirs.out, caseName),
         "outputGlobal": "{}/{}_global.jsonl".format(dirs.out, caseName),
-        "gtJson": "{}/{}.json".format(dirs.groundTruth, caseName),
+        "gtJsonl": "{}/{}.jsonl".format(dirs.groundTruth, caseName),
         "logs": "{}/{}.txt".format(dirs.logs, caseName),
     }
 

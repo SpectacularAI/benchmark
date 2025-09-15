@@ -5,11 +5,9 @@ import numpy as np
 import scipy
 from scipy.spatial.transform import Rotation
 
-YIELD_INTERVAL_SECONDS = 0.005
+from .util import readJsonl
 
-def readJsonl(filePath):
-    with open(filePath) as f:
-        for l in f: yield(json.loads(l))
+YIELD_INTERVAL_SECONDS = 0.005
 
 def readJson(filePath):
     with open(filePath) as f:
