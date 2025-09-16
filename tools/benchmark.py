@@ -54,7 +54,7 @@ def getArgParser():
     parser.add_argument("-gitDir", help="Subfolder that should be used for saving git stats")
     parser.add_argument("-gitBranchName", help="Written to info.json")
     parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
-    parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
+    parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="OnDevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
     parser.add_argument("-poseTrailLengths", type=str, default="1,2,4", help="Pose trail metrics target segment lengths, in seconds, separated by comma.")
