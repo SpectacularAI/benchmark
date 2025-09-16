@@ -11,9 +11,9 @@ def readDatasetsJsonl(filePath, include=[], exclude=[]):
     nameToInd = {}
     filteredData = []
     for obj in readJsonl(filePath):
-        name = obj["pose"]["name"].lower()
-        if include and not name in include: continue
-        if name in exclude: continue
+        name = obj["pose"]["name"]
+        if include and not name.lower() in include: continue
+        if name.lower() in exclude: continue
         if name not in nameToInd:
             nameToInd[name] = len(filteredData)
             filteredData.append({
