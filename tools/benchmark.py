@@ -156,18 +156,8 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
 
     return infoJsonPath
 
-# Maps from JSONL format keys to names shown in the output data and plots.
-TRACK_KINDS = {
-    "groundTruth": "groundTruth",
-    "ARKit": "ARKit",
-    "arcore": "ARCore",
-    "arengine": "AREngine",
-    "output": "OnDevice",
-    "realsense": "RealSense",
-    "gps": "GPS",
-    "rtkgps": "RTKGPS",
-    "externalPose": "externalPose",
-}
+# Track types recognized at the root.
+TRACK_KINDS = [ "groundTruth", "ARKit", "ARCore", "AREngine", "output" "OnDevice", "RealSense", "GPS", "RTKGPS", "externalPose" ]
 
 def convertComparisonData(casePaths, metricSets, gnssConverter):
     frameCount = 0
@@ -183,19 +173,20 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         # Import conditionally since scipy is otherwise not needed for benchmarking.
         from scipy.spatial.transform import Rotation
 
+    trackKindsIncludingLower = [s.lower() for s in TRACK_KINDS]
+    trackKindsIncludingLower.extend(TRACK_KINDS)
+
     def handleRow(rowJson):
+        pose = None
         kind = None
-        for k in TRACK_KINDS:
-            if rowJson.get(k) is not None:
+        for k in trackKindsIncludingLower:
+            if k in rowJson:
                 kind = k
-                pose = rowJson[kind]
+                pose = rowJson[k]
                 break
         if "pose" in rowJson:
-            for k in TRACK_KINDS:
-                if rowJson["pose"]["name"] == k:
-                    kind = k
-                    pose = rowJson["pose"]
-                    break
+            kind = rowJson["pose"]["name"]
+            pose = rowJson["pose"]
         if not kind: return
 
         if not kind in datasets:
@@ -215,11 +206,14 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
         json = {
             "time": rowJson["time"],
-            "position": { "x": dToW[0, 3], "y": dToW[1, 3], "z": dToW[2, 3] },
+            "pose": {
+                "name": kind,
+                "position": { "x": dToW[0, 3], "y": dToW[1, 3], "z": dToW[2, 3] },
+            },
         }
         if hasOrientation:
             q = Rotation.from_matrix(dToW[0:3, 0:3]).as_quat()
-            json["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
+            json["pose"]["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
         datasets[kind].append(json)
 
     if os.path.exists(casePaths["input"]):
@@ -242,7 +236,10 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
                 row = json.loads(line)
                 postprocessed.append({
                     "time": row["time"],
-                    "position": row["position"],
+                    "pose": {
+                        "name": "postprocessed",
+                        "position": row["position"],
+                    },
                 })
 
     realtime = []
@@ -252,33 +249,33 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
                 row = json.loads(line)
                 realtime.append({
                     "time": row["time"],
-                    "position": row["position"],
+                    "pose": {
+                        "name": "realtime",
+                        "position": row["position"],
+                    },
                 })
 
-    with open(casePaths["gtJson"], "w") as gtJsonFile:
-        def addDataSet(array, name, d):
-            if d: array.append({ 'name': name, 'data': d })
+    # First found data type will be used as ground truth.
+    kindsOrdered = [
+        "groundTruth",
+        "externalPose",
+        "ARKit",
+        "output",
+        "realsense",
+        "gps",
+        "rtkgps",
+    ]
+    values = []
+    for kind in kindsOrdered:
+        if not kind in datasets: continue
+        values.extend(datasets[kind])
+    values.extend(postprocessed)
+    values.extend(realtime)
 
-        # First found data type will be used as ground truth.
-        kindsOrdered = [
-            "groundTruth",
-            "externalPose",
-            "ARKit",
-            "output",
-            "realsense",
-            "gps",
-            "rtkgps",
-        ]
-        datasetsOrdered = []
-        for kind in kindsOrdered:
-            if not kind in datasets: continue
-            addDataSet(datasetsOrdered, TRACK_KINDS[kind], datasets[kind])
-
-        if COMPARE_POSTPROCESSED:
-            addDataSet(datasetsOrdered, "postprocessed", postprocessed)
-            addDataSet(datasetsOrdered, "realtime", realtime)
-
-        json.dump({'datasets': datasetsOrdered}, gtJsonFile)
+    with open(casePaths["gtJsonl"], "w") as f:
+        for obj in values:
+            f.write(json.dumps(obj, separators=(',', ':')))
+            f.write("\n")
 
     return frameCount
 
@@ -293,7 +290,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         "outputMap": "{}/{}_map.jsonl".format(dirs.out, caseName),
         "outputRealtime": "{}/{}_realtime.jsonl".format(dirs.out, caseName),
         "outputGlobal": "{}/{}_global.jsonl".format(dirs.out, caseName),
-        "gtJson": "{}/{}.json".format(dirs.groundTruth, caseName),
+        "gtJsonl": "{}/{}.jsonl".format(dirs.groundTruth, caseName),
         "logs": "{}/{}.txt".format(dirs.logs, caseName),
     }
 
