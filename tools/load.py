@@ -60,7 +60,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
 
 
     method = None
-    if "methodName" in info: method = info["methodName"].lower()
+    if "methodName" in info: method = info["methodName"]
 
     position = []
     orientation = []

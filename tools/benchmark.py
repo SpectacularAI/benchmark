@@ -54,7 +54,7 @@ def getArgParser():
     parser.add_argument("-gitDir", help="Subfolder that should be used for saving git stats")
     parser.add_argument("-gitBranchName", help="Written to info.json")
     parser.add_argument("-baseline", help="Path to metrics.json to use in computing relative metrics")
-    parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="OnDevice")
+    parser.add_argument("-excludePlots", type=str, help="Tracks to skip plotting, split by comma", default="ondevice")
     parser.add_argument("-debug", help="Print more informative error messages", action="store_true")
     parser.add_argument("-sampleIntervalForVelocity", help="Downsamples ground truth position/orientation frequency before calculating velocity and angular velocity, provide minimum number of seconds between samples i.e. 0.1 = max 10Hz GT", type=float, default=DEFAULT_SAMPLE_INTERVAL_FOR_VELOCITY)
     parser.add_argument("-poseTrailLengths", type=str, default="1,2,4", help="Pose trail metrics target segment lengths, in seconds, separated by comma.")
@@ -156,18 +156,8 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
 
     return infoJsonPath
 
-# Maps from JSONL format keys to names shown in the output data and plots.
-TRACK_KINDS = {
-    "groundTruth": "groundTruth",
-    "ARKit": "ARKit",
-    "arcore": "ARCore",
-    "arengine": "AREngine",
-    "output": "OnDevice",
-    "realsense": "RealSense",
-    "gps": "GPS",
-    "rtkgps": "RTKGPS",
-    "externalPose": "externalPose",
-}
+# Track types recognized at the root.
+TRACK_KINDS = [ "groundTruth", "ARKit", "ARCore", "AREngine", "output" "OnDevice", "RealSense", "GPS", "RTKGPS", "externalPose" ]
 
 def convertComparisonData(casePaths, metricSets, gnssConverter):
     frameCount = 0
@@ -183,22 +173,21 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         # Import conditionally since scipy is otherwise not needed for benchmarking.
         from scipy.spatial.transform import Rotation
 
+    trackKindsIncludingLower = [s.lower() for s in TRACK_KINDS]
+    trackKindsIncludingLower.extend(TRACK_KINDS)
+
     def handleRow(rowJson):
         pose = None
         kind = None
-        for k in TRACK_KINDS:
-            if rowJson.get(k) is not None:
+        for k in trackKindsIncludingLower:
+            if k in rowJson:
                 kind = k
                 pose = rowJson[k]
                 break
         if "pose" in rowJson:
-            for k in TRACK_KINDS:
-                if rowJson["pose"]["name"] == k:
-                    kind = k
-                    pose = rowJson["pose"]
-                    break
+            kind = rowJson["pose"]["name"]
+            pose = rowJson["pose"]
         if not kind: return
-        assert(pose is not None)
 
         if not kind in datasets:
             datasets[kind] = []
