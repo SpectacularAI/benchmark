@@ -8,6 +8,7 @@ def isSparse(out):
     n = out.shape[0]
     if n <= 1: return True
     lengthSeconds = out[-1, 0] - out[0, 0]
+    if lengthSeconds < 0.1: return True
     return n / lengthSeconds < SPARSITY_THRESHOLD
 
 def getOverlap(out, gt, includeTime=False):
