@@ -57,7 +57,7 @@ def computeMetricSets(vioAll, gt, info, metricSets):
                 "MAE": meanAbsoluteError(overlapGt, overlapVio),
                 "drift": np.linalg.norm(overlapGt[-1] - overlapVio[-1]),
                 "lengthSeconds": overlapT[-1] - overlapT[0],
-                "lengthMeters": computeLength(overlapVioWithTime, info, 3),
+                "lengthMeters": computeLength(overlapVioWithTime, info),
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         elif metricSet == Metric.COVERAGE:
@@ -98,8 +98,11 @@ def computeMetricSets(vioAll, gt, info, metricSets):
                 "xy": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=False, isVelocity=True),
                 "z": computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis=True, isVelocity=True),
             }
-        elif metricSet == Metric.GLOBAL:
+        elif metricSet == Metric.GLOBAL or metricSet == Metric.GLOBAL_NO_Z:
             overlapVio, overlapGt, overlapT = getOverlap(pVio, pGt, includeTime=True)
+            if metricSet == Metric.GLOBAL_NO_Z:
+                overlapVio = overlapVio[:,:-1]
+                overlapGt = overlapGt[:,:-1]
             metrics[metricSetStr] = None
             if overlapVio.size <= 0 or overlapGt.size <= 0: continue
             overlapGtWithTime = np.hstack((overlapT.reshape(-1, 1), overlapGt))
@@ -108,7 +111,7 @@ def computeMetricSets(vioAll, gt, info, metricSets):
                 "MAE": meanAbsoluteError(overlapGt, overlapVio),
                 "drift": np.linalg.norm(overlapGt[-1] - overlapVio[-1]),
                 "lengthSeconds": overlapT[-1] - overlapT[0],
-                "lengthMeters": computeLength(overlapGtWithTime, info, 3),
+                "lengthMeters": computeLength(overlapGtWithTime, info),
             }
             computePercentiles(overlapGt, overlapVio, metrics[metricSetStr])
         elif metricSet == Metric.GLOBAL_VELOCITY:
@@ -126,7 +129,7 @@ def computeMetricSets(vioAll, gt, info, metricSets):
 def computeSummaryValue(metricsJson):
     if Metric.POSE_TRAIL_3D.value in metricsJson:
         return ("pose trail 3s", metricsJson[Metric.POSE_TRAIL_3D.value]["3s"])
-    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.GLOBAL_NO_Z, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
         if not metricSet.value in metricsJson: continue
         if not metricsJson[metricSet.value]: return None
         return (f"{metricSet.value} RMSE", metricsJson[metricSet.value]["RMSE"])
@@ -159,7 +162,7 @@ def computeRelativeMetrics(metrics, baseline):
             a = np.mean(list(metrics[metricSetStr].values()))
             b = np.mean(list(baseline[metricSetStr].values()))
             setRelativeMetric(relative, metricSetStr, a, b)
-    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+    for metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.GLOBAL_NO_Z, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
         metricSetStr = metricSet.value
         if hasResults(metricSetStr, metrics) and hasResults(metricSetStr, baseline):
             a = metrics[metricSetStr]["RMSE"]

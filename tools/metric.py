@@ -37,6 +37,8 @@ class Metric(Enum):
     NO_ALIGN = "no_align"
     # Similar to `NO_ALIGN`, but requires VIO output and reference tracks in WGS coordinates.
     GLOBAL = "global"
+    # Like `GLOBAL`, but does not penalize drift in z direction.
+    GLOBAL_NO_Z = "global_no_z"
     # For non-piecewise alignment, this is the "proper" metric for VIO methods that
     # rotates the track only around the z-axis since the VIO is supposed to be able
     # to estimate direction of gravity (z-axis). The piecewise alignment methods are
@@ -107,7 +109,7 @@ def metricSetToAlignmentParams(metricSet):
         Metric.PIECEWISE_NO_Z,
     ]:
         return {} # The defaults are correct.
-    elif metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.GLOBAL_VELOCITY]:
+    elif metricSet in [Metric.NO_ALIGN, Metric.GLOBAL, Metric.GLOBAL_NO_Z, Metric.GLOBAL_VELOCITY]:
         return dict(alignEnabled=False)
     elif metricSet == Metric.FULL_3D:
         return dict(align3d=True)
@@ -122,6 +124,7 @@ def metricHasZAxisVisualization(metricSet):
     if metricSet in [
         Metric.NO_ALIGN,
         Metric.GLOBAL,
+        Metric.GLOBAL_NO_Z,
         Metric.FULL,
         Metric.FULL_3D,
         Metric.FULL_3D_SCALED,
@@ -406,10 +409,9 @@ def computeAngularVelocity(data, intervalSeconds=None):
         avs.append(av)
     return np.array(avs)
 
-def computeLength(gt, info, dim=3):
+def computeLength(gt, info):
     if not "videoTimeSpan" in info or not info["videoTimeSpan"]: return None
     if gt.size == 0: return None
-    assert(gt.shape[1] == 4)
     # Use range of video input as the target, since in some datasets the ground truth
     # samples cover a longer segment.
     t0 = info["videoTimeSpan"][0]
@@ -424,7 +426,7 @@ def computeLength(gt, info, dim=3):
         t = gt[i, 0]
         if t < t0: continue
         if t > t1: break
-        p1 = gt[i, 1:dim+1]
+        p1 = gt[i, 1:]
         if p0 is None: p0 = p1
         d2 = (p1 - p0).dot(p1 - p0)
         if d2 >= d2Min:
