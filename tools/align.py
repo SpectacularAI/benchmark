@@ -133,8 +133,8 @@ def piecewiseAlign(out, gt, piece_len_sec=10.0, na_breaks=False):
     """ Align `out` in pieces so that they match `gt`. """
     gt_t = gt[:,0]
     out_t = out[:,0]
-    max_t = np.max(gt_t)
-    t = np.min(gt_t)
+    max_t = min(np.max(gt_t), np.max(out_t))
+    t = max(np.min(gt_t), np.min(out_t))
     aligned = []
     while t < max_t:
         t1 = t + piece_len_sec
