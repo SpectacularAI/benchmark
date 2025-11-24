@@ -148,6 +148,7 @@ def piecewiseAlign(out, gt, piece_len_sec=10.0, na_breaks=False):
             aligned.append(na_spacer)
         t = t1
 
+    if not aligned: return np.array([])
     return np.vstack(aligned)
 
 # Align 3-vectors such as velocity and angular velocity using rotation that matches the position tracks.
