@@ -83,7 +83,7 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.ORIENTATION_FULL:
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True, alignType=OrientationAlign.TRAJECTORY)
         elif metricSet == Metric.ORIENTATION_ALIGNED:
-            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+            metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, full=True, alignType=OrientationAlign.AVERAGE_ORIENTATION)
         elif metricSet == Metric.PREDICTION:
             metrics[metricSetStr] = computePredictionErrorMetrics(vio, PREDICTION_SECONDS)
         elif metricSet == Metric.TRACKING_QUALITY:
