@@ -67,11 +67,11 @@ class Metric(Enum):
     VELOCITY = "velocity"
     # Like VELOCITY but with WGS velocities without alignment.
     GLOBAL_VELOCITY = "global_velocity"
-    # Orientation error
+    # Orientation error, aligned by position track shapes.
     ORIENTATION = "orientation"
-    # Orientation error, including error split by gravity and heading
+    # Orientation error,  aligned by position track shapes. Includes error split by gravity and heading.
     ORIENTATION_FULL = "orientation_full"
-    # Orientation error, orientation is first aligned with ground truth
+    # Orientation error, where the VIO orientations are aligned to ground truth with a single rotation that is the best match.
     ORIENTATION_ALIGNED = "orientation_aligned"
     # Error when predicting position and orientation forward in time
     PREDICTION = "prediction"
