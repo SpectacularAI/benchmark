@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 import pathlib
@@ -40,7 +41,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
     global VIO_OUTPUT_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
     key = "{}+{}+{}+{}".format(baseName, caseName, vioTrackKind.value, getPoseTrails)
-    if key in VIO_OUTPUT_CACHE: return VIO_OUTPUT_CACHE[key].copy()
+    if key in VIO_OUTPUT_CACHE: return copy.deepcopy(VIO_OUTPUT_CACHE[key])
 
     fileStem = ""
     if vioTrackKind == VioTrackKind.POSTPROCESSED: fileStem = "_map"
@@ -171,7 +172,7 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
         'status': np.array(status),
         'globalStatus': np.array(globalStatus),
     }
-    return VIO_OUTPUT_CACHE[key].copy()
+    return copy.deepcopy(VIO_OUTPUT_CACHE[key])
 
 OTHER_DATASETS_CACHE = {}
 
@@ -182,11 +183,11 @@ def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
     global OTHER_DATASETS_CACHE
     baseName = benchmarkFolder.split("/")[-1] # Avoid differences from relative paths and symlinks.
     key = "{}+{}+{}".format(baseName, caseName, "-".join(include))
-    if key in OTHER_DATASETS_CACHE: return OTHER_DATASETS_CACHE[key].copy()
+    if key in OTHER_DATASETS_CACHE: return copy.deepcopy(OTHER_DATASETS_CACHE[key])
 
     gtJsonl = "{}/ground-truth/{}.jsonl".format(benchmarkFolder, caseName)
     if os.path.isfile(gtJsonl):
         OTHER_DATASETS_CACHE[key] = readDatasetsJsonl(gtJsonl, include, exclude)
     else:
         return []
-    return OTHER_DATASETS_CACHE[key].copy()
+    return copy.deepcopy(OTHER_DATASETS_CACHE[key])
