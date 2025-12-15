@@ -279,7 +279,17 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
     return frameCount
 
-def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics=None):
+def tryBenchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics=None):
+    try:
+        benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics)
+    except Exception as e:
+        if args.debug:
+            import traceback
+            print(traceback.format_exc())
+        print("benchmarkSingleDataset() failed for {}: {}".format(benchmark.name, e))
+        raise e
+
+def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics):
     caseDir = benchmark.dir
     caseName = benchmark.name
 
@@ -585,7 +595,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
             print("No matching benchmarks found! Exiting")
             return
 
-        threadFunction = partial(benchmarkSingleDataset,
+        threadFunction = partial(tryBenchmarkSingleDataset,
             dirs=dirs, vioTrackingFn=vioTrackingFn, args=args, baselineMetrics=baselineMetrics)
 
         print("---")
