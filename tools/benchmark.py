@@ -281,7 +281,7 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
 def tryBenchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics=None):
     try:
-        benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics)
+        return benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics)
     except Exception as e:
         if args.debug:
             import traceback
