@@ -214,6 +214,8 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         if hasOrientation:
             q = Rotation.from_matrix(dToW[0:3, 0:3]).as_quat()
             json["pose"]["orientation"] = { "x": q[0], "y": q[1], "z": q[2], "w": q[3] }
+        if "agl" in pose:
+            json["pose"]["agl"] = pose["agl"]
         datasets[kind].append(json)
 
     if os.path.exists(casePaths["input"]):

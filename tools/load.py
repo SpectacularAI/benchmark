@@ -11,6 +11,7 @@ from .util import readJsonl
 def readDatasetsJsonl(filePath, include=[], exclude=[]):
     nameToInd = {}
     filteredData = []
+    agls = []
     for obj in readJsonl(filePath):
         name = obj["pose"]["name"]
         if include and not name.lower() in include: continue
@@ -28,11 +29,17 @@ def readDatasetsJsonl(filePath, include=[], exclude=[]):
         if "orientation" in d:
             q = d["orientation"]
             filteredData[ind]["orientation"].append([obj["time"], q["x"], q["y"], q["z"], q["w"]]) # Scipy ordering.
+        if name == "groundTruth" and "agl" in obj["pose"]:
+            agls.append([obj["time"], obj["pose"]["agl"]])
 
     for data in filteredData:
         data["position"] = np.array(data["position"])
         data["orientation"] = np.array(data["orientation"])
-    return filteredData
+
+    return {
+        "tracks": filteredData,
+        "agls": np.array(agls),
+    }
 
 VIO_OUTPUT_CACHE = {}
 
@@ -189,5 +196,5 @@ def readDatasets(benchmarkFolder, caseName, include=[], exclude=[]):
     if os.path.isfile(gtJsonl):
         OTHER_DATASETS_CACHE[key] = readDatasetsJsonl(gtJsonl, include, exclude)
     else:
-        return []
+        return {}
     return copy.deepcopy(OTHER_DATASETS_CACHE[key])

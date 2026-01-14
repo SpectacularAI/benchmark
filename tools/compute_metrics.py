@@ -13,7 +13,7 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vioAll, gt, info, metricSets):
+def computeMetricSets(vioAll, gt, agls, info, metricSets):
     pGt = gt["position"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
     poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
@@ -78,6 +78,8 @@ def computeMetricSets(vioAll, gt, info, metricSets):
         elif metricSet == Metric.CPU_TIME:
             metrics[metricSetStr] = None
             if "cpuTime" in info: metrics[metricSetStr] = info["cpuTime"]
+        elif metricSet == Metric.AGL:
+            metrics[metricSetStr] = computeAglStats(agls)
         elif metricSet == Metric.ORIENTATION:
             metrics[metricSetStr] = computeOrientationErrorMetric(vio, gt, alignType=OrientationAlign.TRAJECTORY)
         elif metricSet == Metric.ORIENTATION_FULL:
@@ -182,7 +184,10 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
         info = json.loads(infoFile.read())
 
     datasets = readDatasets(benchmarkFolder, caseName, GROUND_TRUTH_TYPES)
-    gt = datasets[0] if datasets else None
+    agls = datasets.get("agls", [])
+    gt = None
+    if "tracks" in datasets and datasets["tracks"]:
+        gt = datasets["tracks"][0]
     if not gt: return None
 
     vio = {}
@@ -192,7 +197,7 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
 
     if metricSets is None: metricSets = info["metricSets"]
 
-    metricsJson = computeMetricSets(vio, gt, info, metricSets)
+    metricsJson = computeMetricSets(vio, gt, agls, info, metricSets)
     if baseline:
         relative = computeRelativeMetrics(metricsJson, baseline)
         metricsJson["relative"] = relative

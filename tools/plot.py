@@ -82,6 +82,13 @@ def metricsToString(metrics, metricSet, relative=None, short=True, z_axis=False)
     if not metrics:
         return "N/A"
     s = ""
+
+    if metricSet == Metric.AGL.value:
+        s += "{:.1f}, {:.1f}, {:.1f}, {:.1f}".format(metrics["min"], metrics["mean"], metrics["median"], metrics["max"])
+        if not short:
+            s += " -- min, mean, median, max [m]"
+        return s
+
     if relative:
         s += "[{:.2f}], ".format(relative)
 
@@ -153,7 +160,7 @@ def colorByGlobalStatus(axis, globalStatus, startTime=0, maxTime=None):
         seen.add(s)
         axis.axvspan(t0, t1, facecolor=facecolor, alpha=0.15, label=label)
 
-def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, caseCount=None):
+def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False, multiplePlots=False):
     data = [vio]
 
     INCLUDE_VIO_POSITION_BASED_VELOCITY = False
@@ -167,7 +174,7 @@ def plotGlobalVelocity(vio, tracks, axis, sampleIntervalForVelocity, speed=False
         gtV = computeVelocity(gt, intervalSeconds=sampleIntervalForVelocity, filterZeroVelocities=True)
         data.append({ "name": gt["name"], "velocity": gtV })
 
-    limit = 1200 if caseCount == 1 else 240
+    limit = 240 if multiplePlots else 1200
     startTime = None
     for d in data:
         if "velocity" not in d or d["velocity"].size == 0: continue
@@ -271,7 +278,7 @@ def plotPredictionError(vio, axis, predictSeconds):
     axis.set_ylabel('Position [mm]', color='teal', fontweight='bold')
     ax2.set_ylabel('Orientation [°]', color='orange', fontweight='bold')
 
-def plotGlobalCovariance(vio, gt, sampleIntervalForVelocity, axis, z_axis, isVelocity=False, caseCount=None):
+def plotGlobalCovariance(vio, gt, sampleIntervalForVelocity, axis, z_axis, isVelocity=False, multiplePlots=False):
     t, err, covLimit, quantile = computeGlobalCovarianceData(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity)
 
     startTime = t[0]
@@ -279,7 +286,7 @@ def plotGlobalCovariance(vio, gt, sampleIntervalForVelocity, axis, z_axis, isVel
     vs = np.column_stack([t, err, covLimit])
 
     # Plot only part to keep the plot legible.
-    limit = 2500 if caseCount == 1 else 500
+    limit = 500 if multiplePlots else 2500
     vs = vs[vs[:, 0] < limit, :]
 
     axis.plot(vs[:, 0], vs[:, 1], label="error", color="red")
@@ -308,6 +315,13 @@ def plotTrackingQuality(vio, axis, metrics):
         err = np.array(err)
         err *= 10
         axis.plot(t, err, label="segment position error")
+
+def plotAgl(agls, axis, multiplePlots):
+    if agls.size == 0: return
+    axis.plot(agls[:, 0], agls[:, 1], label="AGL")
+    if not multiplePlots:
+        axis.set_xlabel('Time [s]')
+        axis.set_ylabel('AGL [m]')
 
 def plotPoseTrails(args, vio, tracks, axis, ax1, ax2, info):
     if len(tracks) == 0:
@@ -469,11 +483,13 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
     getPoseTrails = metricSet in [Metric.POSE_TRAIL_3D.value, Metric.TRACKING_QUALITY.value]
 
+    multiplePlots = caseCount > 1
+
     for i, caseName in enumerate(caseNames):
         try:
             if args.simplePlot:
                 titleStr = ""
-            elif caseCount > 1:
+            elif multiplePlots:
                 # Try to avoid text going over other subfigure titles.
                 titleStr = shorten(caseName)
             else:
@@ -497,7 +513,11 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     if "relative" in metrics and metricSet in metrics["relative"]:
                         relativeMetric = metrics["relative"][metricSet]
 
-            tracks = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
+            datasets = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
+            if "tracks" not in datasets: continue
+            tracks = datasets["tracks"]
+            agls = datasets.get("agls", [])
+
             postprocessed = metricSet == Metric.POSTPROCESSED.value
             vioTrackKind = metricToTrackKind(Metric(metricSet))
             vio = readVioOutput(benchmarkFolder, caseName, sharedInfo, vioTrackKind, getPoseTrails)
@@ -519,7 +539,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             elif metricSet == Metric.VELOCITY.value:
                 plotVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis)
             elif metricSet == Metric.GLOBAL_VELOCITY.value:
-                plotGlobalVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis, caseCount=caseCount)
+                plotGlobalVelocity(vio, tracks, plotAxis, sampleIntervalForVelocity, speed=args.z_axis, multiplePlots=multiplePlots)
             elif postprocessed:
                 tracks.append(vio)
                 # Align using the (sparse) postprocessed VIO time grid.
@@ -535,6 +555,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotPredictionError(vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
             elif metricSet == Metric.TRACKING_QUALITY.value:
                 plotTrackingQuality(vio, plotAxis, metrics)
+            elif metricSet == Metric.AGL.value:
+                plotAgl(agls, plotAxis, multiplePlots)
             elif metricSet == Metric.POSE_TRAIL_3D.value:
                 plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2, caseInfo)
             elif metricSet == Metric.GLOBAL_ERROR_OVER_TIME.value:
@@ -543,10 +565,10 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                     includeLegend = True
             elif metricSet == Metric.GLOBAL_COVARIANCE.value:
                 if len(tracks) >= 1:
-                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=False, caseCount=caseCount)
+                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=False, multiplePlots=multiplePlots)
             elif metricSet == Metric.GLOBAL_VELOCITY_COVARIANCE.value:
                 if len(tracks) >= 1:
-                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=True, caseCount=caseCount)
+                    plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=True, multiplePlots=multiplePlots)
             else:
                 # Also for metrics with no plot of their own, show the 2d trajectory.
                 tracks.append(vio)
@@ -564,7 +586,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 if titleStr: titleStr += "\n"
                 if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
                     titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
-                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, True, z_axis=args.z_axis)
+                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, short=multiplePlots, z_axis=args.z_axis)
             plotAxis.title.set_text(titleStr)
 
             _, labels = plotAxis.get_legend_handles_labels()
@@ -575,7 +597,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
 
         except Exception as e:
-            if caseCount > 1:
+            if multiplePlots:
                 # For aggregate plots do not crash the entire plot but mark the failed case.
                 print("Exception for {}: `{}`".format(titleStr, e))
                 plotAxis.set_title("FAILED {}\n{}".format(titleStr, e), color="red")

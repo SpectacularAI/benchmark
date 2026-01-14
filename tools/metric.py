@@ -92,6 +92,8 @@ class Metric(Enum):
     COVERAGE = "coverage"
     # Output from UNIX `time` command (not wall time).
     CPU_TIME = "cpu_time"
+    # For stats and plots of reference track AGL (altitude above ground level).
+    AGL = "agl"
 
 def metricToTrackKind(metricSet):
     if metricSet == Metric.POSTPROCESSED:
@@ -115,7 +117,7 @@ def metricSetToAlignmentParams(metricSet):
         return dict(align3d=True)
     elif metricSet == Metric.FULL_3D_SCALED:
         return dict(align3d=True, fix_scale=False)
-    elif metricHorizontalAxisIsTime(metricSet) or metricSet in [Metric.CPU_TIME]:
+    elif metricHorizontalAxisIsTime(metricSet) or metricSet in [Metric.CPU_TIME, Metric.AGL]:
         return {} # No natural alignment for these / not used.
     else:
         raise Exception("Unimplemented alignment parameters for metric {}".format(metricSet.value))
@@ -522,6 +524,16 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
 
 def rmseAngle(a):
     return np.sqrt(np.mean(np.array(a)**2))
+
+def computeAglStats(agls):
+    if agls.size == 0: return None
+    a = np.array(agls)[:, 1]
+    return {
+        "min": np.min(a),
+        "max": np.max(a),
+        "mean": np.mean(a),
+        "median": np.median(a),
+    }
 
 def computeOrientationErrorMetric(vio, gt, full=False, alignType=None):
     if gt and len(gt.get("orientation", [])) > 0:
