@@ -383,7 +383,7 @@ def plotErrorOverTime(gt, vio, axis, z_axis, includeLegend):
         lines2, labels2 = axis2.get_legend_handles_labels()
         axis.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
 
-def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin):
+def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin, equalAxis=True):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
 
@@ -409,7 +409,8 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
         plotLoopClosures(track, axis, ax1, ax2)
         plotResets(track, axis, ax1, ax2)
 
-    axis.axis('equal')
+    if equalAxis:
+        axis.axis('equal')
 
 def plotLoopClosures(track, axis, ax1, ax2):
     if not "loopClosures" in track or not track["loopClosures"]: return
@@ -573,7 +574,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 # Also for metrics with no plot of their own, show the 2d trajectory.
                 tracks.append(vio)
                 gtInd = 0 if len(tracks) >= 2 else None
-                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin)
+                equalAxis = not args.z_axis
+                plot2dTracks(args, tracks, gtInd, plotAxis, ax1, ax2, metricSet, postprocessed, fixOrigin, equalAxis=equalAxis)
 
             # Draw legend
             plotAxis.tick_params(axis='both', which='major', labelsize=args.tickSize, width=args.lineWidth)
