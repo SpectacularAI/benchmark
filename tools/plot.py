@@ -6,7 +6,7 @@ import pathlib
 from .load import readDatasets, readVioOutput
 from .metric import *
 from .metric_pose_trail import generatePoseTrailMetricSegments
-from .align import align, isSparse, getOverlap
+from .align import align, isSparse, getOverlap, getOverlapSingle
 
 import numpy as np
 
@@ -358,9 +358,15 @@ def plotPoseTrails(args, vio, tracks, axis, ax1, ax2, info):
         label = "Inertial-only (using VIO biases and velocity)" if segmentInd == 0 else None
         axis.plot(x, y, label=label, color="green", linewidth=1)
 
-def plotErrorOverTime(gt, vio, axis, z_axis, includeLegend):
+def plotErrorOverTime(gt, vio, axis, z_axis, agls, includeLegend):
     oVio, oGt, time = getOverlap(vio["position"], gt["position"], includeTime=True)
     if time.size == 0: return
+
+    plot_agl = False
+    if np.any(agls) and time.size >= 2:
+        agls_overlap = getOverlapSingle(time, agls)
+        plot_agl = True
+
     time -= time[0]
 
     if z_axis:
@@ -377,11 +383,14 @@ def plotErrorOverTime(gt, vio, axis, z_axis, includeLegend):
     axis2.plot(time, oGt[:, 2], 'k--', label='Altitude ({})'.format(gt["name"]), alpha=0.7)
     axis2.set_ylabel('Altitude [m]')
 
+    if plot_agl:
+        axis2.plot(time, agls_overlap, 'gray', linestyle=':', label='Altitude AGL ({})'.format(gt["name"]))
+
     # Combine legends from both axes.
     if includeLegend:
         lines1, labels1 = axis.get_legend_handles_labels()
         lines2, labels2 = axis2.get_legend_handles_labels()
-        axis.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+        axis2.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
 
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin, equalAxis=True):
     import matplotlib.pyplot as plt
@@ -562,8 +571,7 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotPoseTrails(args, vio, tracks, plotAxis, ax1, ax2, caseInfo)
             elif metricSet == Metric.GLOBAL_ERROR_OVER_TIME.value:
                 if len(tracks) >= 1:
-                    plotErrorOverTime(tracks[0], vio, plotAxis, args.z_axis, includeLegend)
-                    includeLegend = True
+                    plotErrorOverTime(tracks[0], vio, plotAxis, args.z_axis, agls, includeLegend)
             elif metricSet == Metric.GLOBAL_COVARIANCE.value:
                 if len(tracks) >= 1:
                     plotGlobalCovariance(vio, tracks[0], sampleIntervalForVelocity, plotAxis, z_axis=args.z_axis, isVelocity=False, multiplePlots=multiplePlots)

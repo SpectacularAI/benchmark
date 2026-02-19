@@ -30,6 +30,22 @@ def getOverlap(out, gt, includeTime=False):
     if includeTime: return out_part[:, 1:], gt_part[:, 1:], out_part[:, 0]
     else: return out_part[:, 1:], gt_part[:, 1:]
 
+def getOverlapSingle(time, data, includeTime=False):
+    """Interpolate data for each timestamp in `time`."""
+    if time.size == 0 or data.size == 0:
+        return np.array([])
+
+    data_t = data[:, 0]
+    interpolated_cols = []
+    for i in range(1, data.shape[1]):
+        interpolated_col = np.interp(time, data_t, data[:, i], left=np.nan, right=np.nan)
+        interpolated_cols.append(interpolated_col[:, np.newaxis])
+
+    result = np.hstack(interpolated_cols)
+    if includeTime:
+        return np.hstack((time[:, np.newaxis], result))
+    return result.flatten() if result.shape[1] == 1 else result
+
 def align(out, gt, rel_align_time=-1, fix_origin=False, align3d=False, fix_scale=True,
         origin_zero=False, return_rotation_matrix=False, alignEnabled=True):
     """
