@@ -73,6 +73,8 @@ class Metric(Enum):
     ORIENTATION_FULL = "orientation_full"
     # Orientation error, where the VIO orientations are aligned to ground truth with a single rotation that is the best match.
     ORIENTATION_ALIGNED = "orientation_aligned"
+    # Orientation error, where orientations are not aligned at all.
+    ORIENTATION_NO_ALIGN = "orientation_no_align"
     # Error when predicting position and orientation forward in time
     PREDICTION = "prediction"
     # A plot of RMSE over time, together with altitude.
@@ -152,6 +154,7 @@ def metricHorizontalAxisIsTime(metricSet):
         Metric.ORIENTATION,
         Metric.ORIENTATION_FULL,
         Metric.ORIENTATION_ALIGNED,
+        Metric.ORIENTATION_NO_ALIGN,
         Metric.TRACKING_QUALITY,
         Metric.GLOBAL_COVARIANCE,
         Metric.GLOBAL_VELOCITY_COVARIANCE,
@@ -512,7 +515,10 @@ def computeOrientationErrors(vio, gt, alignType=OrientationAlign.TRAJECTORY):
         totalAngle.append(np.linalg.norm((qVio[i].inv() * qGt[i]).as_rotvec(degrees=True)))
 
         # Project global gravity direction to local coordinates and compare.
-        gravityAngle.append(np.arccos(np.dot(q_ours.transpose() @ GRAVITY_DIRECTION, q_gt.transpose() @ GRAVITY_DIRECTION)))
+        v = np.dot(q_ours.transpose() @ GRAVITY_DIRECTION, q_gt.transpose() @ GRAVITY_DIRECTION)
+        if v > 1: v = 1
+        if v < -1: v = -1
+        gravityAngle.append(np.arccos(v))
 
         headingAngle.append(abs(2 * math.asin((qVio[i] * qGt[i].inv()).as_quat()[2]))) # quat[2] == .z
 

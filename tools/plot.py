@@ -561,6 +561,8 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                 plotOrientationErrors(vio, tracks, plotAxis, full=True, alignType=OrientationAlign.TRAJECTORY)
             elif metricSet == Metric.ORIENTATION_ALIGNED.value:
                 plotOrientationErrors(vio, tracks, plotAxis, full=True, alignType=OrientationAlign.AVERAGE_ORIENTATION)
+            elif metricSet == Metric.ORIENTATION_NO_ALIGN.value:
+                plotOrientationErrors(vio, tracks, plotAxis, full=True, alignType=OrientationAlign.NONE)
             elif metricSet == Metric.PREDICTION.value:
                 plotPredictionError(vio, plotAxis, predictSeconds=PREDICTION_SECONDS)
             elif metricSet == Metric.TRACKING_QUALITY.value:

@@ -168,7 +168,8 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         or Metric.ORIENTATION.value in metricSets
         or Metric.POSE_TRAIL_3D.value in metricSets
         or Metric.ORIENTATION_FULL.value in metricSets
-        or Metric.ORIENTATION_ALIGNED.value in metricSets)
+        or Metric.ORIENTATION_ALIGNED.value in metricSets
+        or Metric.ORIENTATION_NO_ALIGN.value in metricSets)
     if needsOrientation:
         # Import conditionally since scipy is otherwise not needed for benchmarking.
         from scipy.spatial.transform import Rotation
