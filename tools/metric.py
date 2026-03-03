@@ -177,6 +177,8 @@ def meanAbsoluteError(a, b):
 
 # Returns start and end (ex) indexes for source that are within target start and end
 def getIncludedOverlap(sourceTimes, targetTimes):
+    if len(targetTimes) == 0: return None
+    assert(targetTimes[-1] >= targetTimes[0])
     sourceStartInd = 0
     sourceEndInd = len(sourceTimes) - 1
     while sourceTimes[sourceStartInd] < targetTimes[0]: sourceStartInd += 1

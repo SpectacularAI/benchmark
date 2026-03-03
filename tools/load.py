@@ -90,6 +90,8 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
     globalStatus = []
     lastGlobalStatus = "INVALID"
     t = None
+    tLast = None
+    warnedOfUnorderedTimes = False
     with open(outputPath) as f:
         for line in f.readlines():
             row = json.loads(line)
@@ -97,6 +99,13 @@ def readVioOutput(benchmarkFolder, caseName, info, vioTrackKind, getPoseTrails=F
             if method and method in row:
                 row = row[method]
             if t == None: continue
+            if tLast is not None and t < tLast:
+                if not warnedOfUnorderedTimes:
+                    print("VIO timestamps are not ordered, discarding data from {}: {}s < {}s".format(caseName, t, tLast))
+                    warnedOfUnorderedTimes = True
+                continue
+            tLast = t
+
             if not isValidVector(row, "position"): continue
             position.append([t, row["position"]["x"], row["position"]["y"], row["position"]["z"]])
             if isValidVector(row, "orientation"):
