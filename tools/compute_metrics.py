@@ -207,5 +207,5 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
     pathlib.Path(metricsDir).mkdir(parents=True, exist_ok=True)
     metricsPath = "{}/{}.json".format(metricsDir, caseName)
     with open(metricsPath, "w") as metricsFile:
-        metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': ')))
+        metricsFile.write(json.dumps(metricsJson, indent=4, separators=(',', ': '), sort_keys=True))
     return computeSummaryValue(metricsJson)

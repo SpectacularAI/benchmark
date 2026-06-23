@@ -152,7 +152,7 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
 
     infoJsonPath = dirs.results + "/info.json"
     with open(infoJsonPath, "w") as f:
-        f.write(json.dumps(info, indent=4, separators=(',', ': ')))
+        f.write(json.dumps(info, indent=4, separators=(',', ': '), sort_keys=True))
 
     return infoJsonPath
 
@@ -277,7 +277,7 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
     with open(casePaths["gtJsonl"], "w") as f:
         for obj in values:
-            f.write(json.dumps(obj, separators=(',', ':')))
+            f.write(json.dumps(obj, separators=(',', ':'), sort_keys=True))
             f.write("\n")
 
     return frameCount
@@ -350,7 +350,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "globalPose": obj["globalPose"],
         }
 
-        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':')))
+        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
         outputGlobalFile.write("\n")
 
     if outputGlobalFile is not None: outputGlobalFile.close()
@@ -375,7 +375,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
         if benchmark.iteration: infoJson["iteration"] = benchmark.iteration
-        infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': ')))
+        infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': '), sort_keys=True))
 
     baseline = None
     if baselineMetrics and caseName in baselineMetrics:
@@ -617,23 +617,33 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     endTime = datetime.now().strftime(DATE_FORMAT)
 
+    def walkFiles(path: pathlib.Path):
+        if not path.exists():
+            raise Exception(f"No such path `{str(path)}`.")
+        if path.is_file():
+            yield path.name
+        for (_, _, fileNames) in os.walk(path):
+            fileNames.sort()
+            for fileName in fileNames:
+                yield fileName
+            break # Only the top level.
+
     # Copy data from case metrics JSON files to `metrics.json` in the result root.
     metrics = {}
-    for x in os.walk(results + "/metrics"):
-        for caseMetricsJsonPath in x[2]:
-            benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
-            caseName = caseMetricsJsonPath.rpartition(".")[0]
-            assert(not caseName in metrics)
-            metrics[caseName] = {}
-            for k, v in benchmarkMetrics.items():
-                metrics[caseName][k] = v
-                # These have too much text and we don't want to aggregrate metrics for them here.
-                if "pose_trail" in k:
-                    delete = []
-                    for pk, pv in metrics[caseName][k].items():
-                        if "segments" in pk: delete.append(pk)
-                    for d in delete:
-                        del metrics[caseName][k][d]
+    for caseMetricsJsonPath in walkFiles(pathlib.Path(results + "/metrics")):
+        benchmarkMetrics = json.loads(open(os.path.join(results, "metrics", caseMetricsJsonPath)).read())
+        caseName = caseMetricsJsonPath.rpartition(".")[0]
+        assert(not caseName in metrics)
+        metrics[caseName] = {}
+        for k, v in benchmarkMetrics.items():
+            metrics[caseName][k] = v
+            # These have too much text and we don't want to aggregrate metrics for them here.
+            if "pose_trail" in k:
+                delete = []
+                for pk, pv in metrics[caseName][k].items():
+                    if "segments" in pk: delete.append(pk)
+                for d in delete:
+                    del metrics[caseName][k][d]
 
     ametrics = aggregateMetrics(list(metrics.values()))
 
@@ -643,7 +653,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         if "relative" in metrics[x]: del metrics[x]["relative"]
     metricsJsonPath = results + "/metrics.json"
     with open(metricsJsonPath, "w") as f:
-        f.write(json.dumps(metrics, indent=4, separators=(',', ': ')))
+        f.write(json.dumps(metrics, indent=4, separators=(',', ': '), sort_keys=True))
 
     # Needed by plotting below.
     infoJsonPath = writeSharedInfoFile(args, dirs, startTime, endTime, ametrics)
