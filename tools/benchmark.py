@@ -277,7 +277,7 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
 
     with open(casePaths["gtJsonl"], "w") as f:
         for obj in values:
-            f.write(json.dumps(obj, separators=(',', ':')))
+            f.write(json.dumps(obj, separators=(',', ':'), sort_keys=True))
             f.write("\n")
 
     return frameCount
@@ -350,7 +350,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
             "globalPose": obj["globalPose"],
         }
 
-        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':')))
+        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
         outputGlobalFile.write("\n")
 
     if outputGlobalFile is not None: outputGlobalFile.close()
@@ -375,7 +375,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         }
         if cpuTime: infoJson["cpuTime"] = cpuTime
         if benchmark.iteration: infoJson["iteration"] = benchmark.iteration
-        infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': ')))
+        infoFile.write(json.dumps(infoJson, indent=4, separators=(',', ': '), sort_keys=True))
 
     baseline = None
     if baselineMetrics and caseName in baselineMetrics:
