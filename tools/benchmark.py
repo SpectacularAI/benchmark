@@ -381,7 +381,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         baseline = baselineMetrics[caseName]
 
     try:
-        metric = computeMetrics(dirs.results, caseName, baseline)
+        metric = computeMetrics(dirs.results, caseName, baseline, vioSuccess=vioSuccess)
     except Exception as e:
         if args.debug:
             import traceback

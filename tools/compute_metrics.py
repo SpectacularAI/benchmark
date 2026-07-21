@@ -180,7 +180,7 @@ def computeRelativeMetrics(metrics, baseline):
         setRelativeMetric(relative, metricSetStr, a, b)
     return relative
 
-def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
+def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None, vioSuccess=True):
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
@@ -202,6 +202,9 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
     metricsJson = computeMetricSets(vio, gt, agls, info, metricSets)
 
     failures = []
+    if not vioSuccess:
+        failures.append("VIO software crashed")
+
     has_output = False
     for kind, vioOutput in vio.items():
         if "position" in vioOutput and vioOutput["position"].size > 0:
