@@ -200,6 +200,17 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
     if metricSets is None: metricSets = info["metricSets"]
 
     metricsJson = computeMetricSets(vio, gt, agls, info, metricSets)
+
+    failures = []
+    has_output = False
+    for kind, vioOutput in vio.items():
+        if "position" in vioOutput and vioOutput["position"].size > 0:
+            has_output = True
+            break
+    if not has_output:
+        failures.append("no output")
+    metricsJson["failures"] = failures
+
     if baseline:
         relative = computeRelativeMetrics(metricsJson, baseline)
         metricsJson["relative"] = relative

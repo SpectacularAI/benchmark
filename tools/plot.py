@@ -605,8 +605,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             if includeLegend and len(labels) > 0:
                 plotAxis.legend()
 
-            if not "position" in vio or vio["position"].size == 0:
-                plotAxis.set_title("NO OUTPUT {}".format(titleStr), color="red")
+            if metrics and "failures" in metrics and metrics["failures"]:
+                failures_str = ", ".join(metrics["failures"]).upper()
+                plotAxis.set_title("{} {}".format(failures_str, titleStr), color="red")
 
         except Exception as e:
             if multiplePlots:

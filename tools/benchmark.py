@@ -326,34 +326,33 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
                     tokens = line.split()
                     cpuTime = float(tokens[-2]) + float(tokens[-3]) # sys + user
 
-    if not pathlib.Path(casePaths["output"]).exists():
-        print("No output for case", caseName)
-        return
-
     # It's important that the same GnssConverter instance is used for all VIO and reference tracks.
     gnssConverter = GnssConverter()
-    outputGlobalFile = None
-    for obj in readJsonl(casePaths["output"]):
-        if not "globalPose" in obj: continue
-        # Create the file lazily because in many cases there is no global output.
-        if outputGlobalFile is None:
-            outputGlobalFile = open(casePaths["outputGlobal"], "w")
-        coordinates = obj["globalPose"]["coordinates"]
-        gobj = {
-            "time": obj["time"],
-            "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
-            "positionCovariance": obj["globalPose"]["enuPositionCovariance"],
-            "orientation": obj["globalPose"]["orientation"],
-            "velocity": obj["globalPose"]["velocity"],
-            "velocityCovariance": obj["globalPose"]["velocityCovariance"],
-            "status": obj["status"],
-            "globalPose": obj["globalPose"],
-        }
+    if pathlib.Path(casePaths["output"]).exists():
+        outputGlobalFile = None
+        for obj in readJsonl(casePaths["output"]):
+            if not "globalPose" in obj: continue
+            # Create the file lazily because in many cases there is no global output.
+            if outputGlobalFile is None:
+                outputGlobalFile = open(casePaths["outputGlobal"], "w")
+            coordinates = obj["globalPose"]["coordinates"]
+            gobj = {
+                "time": obj["time"],
+                "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
+                "positionCovariance": obj["globalPose"]["enuPositionCovariance"],
+                "orientation": obj["globalPose"]["orientation"],
+                "velocity": obj["globalPose"]["velocity"],
+                "velocityCovariance": obj["globalPose"]["velocityCovariance"],
+                "status": obj["status"],
+                "globalPose": obj["globalPose"],
+            }
 
-        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
-        outputGlobalFile.write("\n")
+            outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
+            outputGlobalFile.write("\n")
 
-    if outputGlobalFile is not None: outputGlobalFile.close()
+        if outputGlobalFile is not None: outputGlobalFile.close()
+    else:
+        print("No output for case", caseName)
 
     metricSets = args.metricSet.split(",")
     frameCount = convertComparisonData(casePaths, metricSets, gnssConverter)
@@ -505,11 +504,19 @@ def aggregateMetrics(metrics):
         return np.array(a).prod() ** (1.0 / len(a))
     if not metrics: return None
 
+    all_failures = set()
+    for metric in metrics:
+        if "failures" in metric and metric["failures"]:
+            all_failures.update(metric["failures"])
+
     metricSets = set()
     for metric in metrics:
         metricSets.update(metric.keys())
+    if "failures" in metricSets:
+        metricSets.remove("failures")
 
     result = {}
+    result["failures"] = sorted(list(all_failures))
     for metricSetStr in metricSets:
         values = collectMetrics(metrics, metricSetStr)
         if not values:
