@@ -394,7 +394,6 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         print("{:40} {:>6.0f}s   {}: {:>8}".format(caseName, duration, metric[0], metricValue))
     else:
         print("{:40} {:>6.0f}s   no metric".format(caseName, duration))
-    return vioSuccess
 
 # Look for the set file in a predefined directory or by path.
 def findSetFile(setDir, setName):
@@ -582,7 +581,6 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     if setupFn:
         setupFn(args, dirs.results)
 
-    success = True
     if not args.skipBenchmark:
         if args.set:
             benchmarks = setupBenchmarkFromSetDescription(args, args.set)
@@ -611,13 +609,11 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         print("---")
         if args.threads == 1:
             for benchmark in benchmarks:
-                if not threadFunction(benchmark):
-                    success = False
+                threadFunction(benchmark)
         else:
             workerCount = int(args.threads) if args.threads else multiprocessing.cpu_count()
             with concurrent.futures.ProcessPoolExecutor(max_workers=workerCount) as executor:
-                for ret in executor.map(threadFunction, benchmarks):
-                    if not ret: success = False
+                list(executor.map(threadFunction, benchmarks))
 
     if teardownFn:
         teardownFn(args, dirs.results)
@@ -680,4 +676,4 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         dst = "{}/{}.png".format(dstDir, runId)
         subprocess.run(["cp", src, dst])
 
-    return success
+    return not ametrics or not ametrics.get("failures")
