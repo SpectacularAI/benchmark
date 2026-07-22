@@ -676,4 +676,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         dst = "{}/{}.png".format(dstDir, runId)
         subprocess.run(["cp", src, dst])
 
-    return not ametrics or not ametrics.get("failures")
+    if ametrics and ametrics.get("failures"):
+        print("Failures detected:", ametrics["failures"])
+        return False
+    return True
