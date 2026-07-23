@@ -326,34 +326,33 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
                     tokens = line.split()
                     cpuTime = float(tokens[-2]) + float(tokens[-3]) # sys + user
 
-    if not pathlib.Path(casePaths["output"]).exists():
-        print("No output for case", caseName)
-        return
-
     # It's important that the same GnssConverter instance is used for all VIO and reference tracks.
     gnssConverter = GnssConverter()
-    outputGlobalFile = None
-    for obj in readJsonl(casePaths["output"]):
-        if not "globalPose" in obj: continue
-        # Create the file lazily because in many cases there is no global output.
-        if outputGlobalFile is None:
-            outputGlobalFile = open(casePaths["outputGlobal"], "w")
-        coordinates = obj["globalPose"]["coordinates"]
-        gobj = {
-            "time": obj["time"],
-            "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
-            "positionCovariance": obj["globalPose"]["enuPositionCovariance"],
-            "orientation": obj["globalPose"]["orientation"],
-            "velocity": obj["globalPose"]["velocity"],
-            "velocityCovariance": obj["globalPose"]["velocityCovariance"],
-            "status": obj["status"],
-            "globalPose": obj["globalPose"],
-        }
+    if pathlib.Path(casePaths["output"]).exists():
+        outputGlobalFile = None
+        for obj in readJsonl(casePaths["output"]):
+            if not "globalPose" in obj: continue
+            # Create the file lazily because in many cases there is no global output.
+            if outputGlobalFile is None:
+                outputGlobalFile = open(casePaths["outputGlobal"], "w")
+            coordinates = obj["globalPose"]["coordinates"]
+            gobj = {
+                "time": obj["time"],
+                "position": gnssConverter.enu(coordinates["latitude"], coordinates["longitude"], coordinates["altitude"]),
+                "positionCovariance": obj["globalPose"]["enuPositionCovariance"],
+                "orientation": obj["globalPose"]["orientation"],
+                "velocity": obj["globalPose"]["velocity"],
+                "velocityCovariance": obj["globalPose"]["velocityCovariance"],
+                "status": obj["status"],
+                "globalPose": obj["globalPose"],
+            }
 
-        outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
-        outputGlobalFile.write("\n")
+            outputGlobalFile.write(json.dumps(gobj, separators=(',', ':'), sort_keys=True))
+            outputGlobalFile.write("\n")
 
-    if outputGlobalFile is not None: outputGlobalFile.close()
+        if outputGlobalFile is not None: outputGlobalFile.close()
+    else:
+        print("No output for case", caseName)
 
     metricSets = args.metricSet.split(",")
     frameCount = convertComparisonData(casePaths, metricSets, gnssConverter)
@@ -382,7 +381,7 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         baseline = baselineMetrics[caseName]
 
     try:
-        metric = computeMetrics(dirs.results, caseName, baseline)
+        metric = computeMetrics(dirs.results, caseName, baseline, vioSuccess=vioSuccess)
     except Exception as e:
         if args.debug:
             import traceback
@@ -395,7 +394,6 @@ def benchmarkSingleDataset(benchmark, dirs, vioTrackingFn, args, baselineMetrics
         print("{:40} {:>6.0f}s   {}: {:>8}".format(caseName, duration, metric[0], metricValue))
     else:
         print("{:40} {:>6.0f}s   no metric".format(caseName, duration))
-    return vioSuccess
 
 # Look for the set file in a predefined directory or by path.
 def findSetFile(setDir, setName):
@@ -505,11 +503,19 @@ def aggregateMetrics(metrics):
         return np.array(a).prod() ** (1.0 / len(a))
     if not metrics: return None
 
+    all_failures = set()
+    for metric in metrics:
+        if "failures" in metric and metric["failures"]:
+            all_failures.update(metric["failures"])
+
     metricSets = set()
     for metric in metrics:
         metricSets.update(metric.keys())
+    if "failures" in metricSets:
+        metricSets.remove("failures")
 
     result = {}
+    result["failures"] = sorted(list(all_failures))
     for metricSetStr in metricSets:
         values = collectMetrics(metrics, metricSetStr)
         if not values:
@@ -575,7 +581,6 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     if setupFn:
         setupFn(args, dirs.results)
 
-    success = True
     if not args.skipBenchmark:
         if args.set:
             benchmarks = setupBenchmarkFromSetDescription(args, args.set)
@@ -604,13 +609,11 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         print("---")
         if args.threads == 1:
             for benchmark in benchmarks:
-                if not threadFunction(benchmark):
-                    success = False
+                threadFunction(benchmark)
         else:
             workerCount = int(args.threads) if args.threads else multiprocessing.cpu_count()
             with concurrent.futures.ProcessPoolExecutor(max_workers=workerCount) as executor:
-                for ret in executor.map(threadFunction, benchmarks):
-                    if not ret: success = False
+                list(executor.map(threadFunction, benchmarks))
 
     if teardownFn:
         teardownFn(args, dirs.results)
@@ -673,4 +676,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         dst = "{}/{}.png".format(dstDir, runId)
         subprocess.run(["cp", src, dst])
 
-    return success
+    if ametrics and ametrics.get("failures"):
+        print("Failures detected:", ametrics["failures"])
+        return False
+    return True

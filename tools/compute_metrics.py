@@ -13,7 +13,7 @@ from .align import align, getOverlap
 GROUND_TRUTH_TYPES = ["groundtruth", "rtkgps", "externalpose", "gps"]
 
 # Compute a dict with all given metrics. If a metric cannot be computed, output `None` for it.
-def computeMetricSets(vioAll, gt, agls, info, metricSets):
+def computeMetricSets(vioAll, gt, agls, info, metricSets, failures):
     pGt = gt["position"]
     fixOrigin = "fixOrigin" in info and info["fixOrigin"]
     poseTrailLengths = info["poseTrailLengths"] if "poseTrailLengths" in info else []
@@ -23,11 +23,18 @@ def computeMetricSets(vioAll, gt, agls, info, metricSets):
     for metricSetStr in metricSets:
         metricSet = Metric(metricSetStr)
         vioTrackKind = metricToTrackKind(metricSet)
-        if not vioTrackKind in vioAll: continue
-        vio = vioAll[vioTrackKind]
 
-        if not "position" in vio: continue
-        pVio = vio["position"]
+        hasVio = vioTrackKind in vioAll
+        vio = vioAll[vioTrackKind] if hasVio else None
+        pVio = vio["position"] if (vio and "position" in vio) else None
+
+        if pVio is None or pVio.size == 0:
+            if metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
+                failures.add("no output")
+                continue
+            elif metricSet in [Metric.GLOBAL, Metric.GLOBAL_NO_Z]:
+                failures.add("no global output")
+                continue
 
         if metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
             measureZError = metricSet != Metric.PIECEWISE_NO_Z
@@ -180,7 +187,7 @@ def computeRelativeMetrics(metrics, baseline):
         setRelativeMetric(relative, metricSetStr, a, b)
     return relative
 
-def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
+def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None, vioSuccess=True):
     infoPath = "{}/info/{}.json".format(benchmarkFolder, caseName)
     with open(infoPath) as infoFile:
         info = json.loads(infoFile.read())
@@ -199,7 +206,13 @@ def computeMetrics(benchmarkFolder, caseName, baseline=None, metricSets=None):
 
     if metricSets is None: metricSets = info["metricSets"]
 
-    metricsJson = computeMetricSets(vio, gt, agls, info, metricSets)
+    failures = set()
+    if not vioSuccess:
+        failures.add("VIO software crashed")
+
+    metricsJson = computeMetricSets(vio, gt, agls, info, metricSets, failures)
+    metricsJson["failures"] = sorted(list(failures))
+
     if baseline:
         relative = computeRelativeMetrics(metricsJson, baseline)
         metricsJson["relative"] = relative
