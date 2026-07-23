@@ -283,8 +283,18 @@ def computeGlobalCovarianceData(vio, gt, sampleIntervalForVelocity, z_axis, isVe
             return mahalanobis(p, np.array([0, 0]), invCov)
         ps = [row for row in p]
 
-    m = [uncertainty(p, cov[1]) for (p, cov) in zip(ps, vioCovariances)]
-    covLimit = ppfValue / m * err
+    m_unit = []
+    if z_axis:
+        for p, cov in zip(ps, vioCovariances):
+            p_unit = p / abs(p) if abs(p) > 1e-9 else 1.0
+            m_unit.append(uncertainty(p_unit, cov[1]))
+    else:
+        for p, cov in zip(ps, vioCovariances):
+            norm_p = np.linalg.norm(p)
+            p_unit = p / norm_p if norm_p > 1e-9 else np.array([1.0, 0.0])
+            m_unit.append(uncertainty(p_unit, cov[1]))
+    m_unit = np.array(m_unit)
+    covLimit = ppfValue / m_unit
     return t, err, covLimit, quantile
 
 def computeGlobalCovarianceMetric(vio, gt, sampleIntervalForVelocity, z_axis, isVelocity):
