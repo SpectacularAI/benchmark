@@ -24,17 +24,18 @@ def computeMetricSets(vioAll, gt, agls, info, metricSets, failures):
         metricSet = Metric(metricSetStr)
         vioTrackKind = metricToTrackKind(metricSet)
 
-        hasVio = vioTrackKind in vioAll
-        vio = vioAll[vioTrackKind] if hasVio else None
+        vio = vioAll[vioTrackKind] if vioTrackKind in vioAll else None
         pVio = vio["position"] if (vio and "position" in vio) else None
 
-        if pVio is None or pVio.size == 0:
+        if vio is None or pVio is None or pVio.size == 0:
             if metricSet in [Metric.NO_ALIGN, Metric.FULL, Metric.FULL_3D, Metric.FULL_3D_SCALED]:
                 failures.add("no output")
                 continue
             elif metricSet in [Metric.GLOBAL, Metric.GLOBAL_NO_Z]:
                 failures.add("no global output")
                 continue
+        if vio is None:
+            continue
 
         if metricSet in [Metric.PIECEWISE, Metric.PIECEWISE_NO_Z]:
             measureZError = metricSet != Metric.PIECEWISE_NO_Z
