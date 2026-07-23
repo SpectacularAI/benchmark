@@ -47,7 +47,7 @@ def getArgParser():
     parser.add_argument("-runId", help="Output folder name. If unset will use timestamp")
     parser.add_argument("-skipBenchmark", help="Skips running benchmark and only aggregates existing ones. For development use.", action="store_true")
     parser.add_argument("-offsetTracks", help="When enabled, tracks are stacked instead of overlaid", action="store_true")
-    parser.add_argument('-metricSet', type=str, default=DEFAULT_METRICS,
+    parser.add_argument('-metricSet', type=str, default=None,
             help="One or more metric kinds, joined by comma, selected from: {}".format(", ".join(allMetrics)))
     parser.add_argument("-fixOrigin", action="store_true", help="Force track starting positions to match for metrics and plots")
     parser.add_argument("-methodName", default="VIO", help="Name of the VIO method being benchmarked")
@@ -551,6 +551,20 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
 
     if args.skipBenchmark and not args.runId:
         raise Exception("-skipBenchmark requires -runId.")
+
+    metric_set_val = args.metricSet
+    if not metric_set_val:
+        resolved_from_set = False
+        if args.set:
+            setPath = findSetFile(args.setDir, args.set)
+            with open(setPath) as setFile:
+                setDefinition = json.load(setFile)
+            if "metricSets" in setDefinition and isinstance(setDefinition["metricSets"], list):
+                metric_set_val = ",".join(setDefinition["metricSets"])
+                resolved_from_set = True
+        if not resolved_from_set:
+            metric_set_val = DEFAULT_METRICS
+    args.metricSet = metric_set_val
 
     metricSets = args.metricSet.split(",")
     if "pose_trail" in metricSets or "pose_trail_3d" in metricSets or "tracking_quality" in metricSets:
