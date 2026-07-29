@@ -497,13 +497,6 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
 
     for i, caseName in enumerate(caseNames):
         try:
-            if args.simplePlot:
-                titleStr = ""
-            elif multiplePlots:
-                # Try to avoid text going over other subfigure titles.
-                titleStr = shorten(caseName)
-            else:
-                titleStr = caseName
             caseMetrics = None
             relativeMetric = None
             plotAxis = subplots[i]
@@ -522,6 +515,26 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
                         caseMetrics = metrics[metricSet]
                     if "relative" in metrics and metricSet in metrics["relative"]:
                         relativeMetric = metrics["relative"][metricSet]
+
+            titleArgs = {}
+            if args.simplePlot:
+                titleStr = ""
+            elif multiplePlots:
+                # Try to avoid text going over other subfigure titles.
+                titleStr = shorten(caseName)
+            else:
+                titleStr = caseName
+
+            if not args.simplePlot:
+                if titleStr: titleStr += "\n"
+                if metrics and "failures" in metrics and metrics["failures"]:
+                    titleStr += ", ".join(metrics["failures"]).upper()
+                    titleArgs["color"] = "red"
+                elif caseMetrics:
+                    if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
+                        titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
+                    titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, short=multiplePlots, z_axis=args.z_axis)
+            plotAxis.set_title(titleStr, **titleArgs)
 
             datasets = readDatasets(benchmarkFolder, caseName, [], args.excludePlots)
             if "tracks" not in datasets: continue
@@ -593,21 +606,9 @@ def plotMetricSet(args, benchmarkFolder, caseNames, sharedInfo, metricSet):
             for spine in plotAxis.spines.values():
                 spine.set_linewidth(args.lineWidth)
 
-            # Set titles
-            if caseMetrics and not args.simplePlot:
-                if titleStr: titleStr += "\n"
-                if caseInfo["paramSet"] != "DEFAULT" and caseInfo["paramSet"]:
-                    titleStr = "{}{}\n".format(titleStr, caseInfo["paramSet"])
-                titleStr += metricsToString(caseMetrics, metricSet, relativeMetric, short=multiplePlots, z_axis=args.z_axis)
-            plotAxis.title.set_text(titleStr)
-
             _, labels = plotAxis.get_legend_handles_labels()
             if includeLegend and len(labels) > 0:
                 plotAxis.legend()
-
-            if metrics and "failures" in metrics and metrics["failures"]:
-                failures_str = ", ".join(metrics["failures"]).upper()
-                plotAxis.set_title("{} {}".format(failures_str, titleStr), color="red")
 
         except Exception as e:
             if multiplePlots:
