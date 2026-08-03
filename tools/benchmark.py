@@ -574,7 +574,11 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         pathlib.Path(dir).mkdir(parents=True, exist_ok=True)
         return dir
 
-    results = withMkdir(os.path.abspath(args.output + "/" + runId))
+    resultsPath = os.path.abspath(args.output + "/" + runId)
+    if not args.skipBenchmark:
+        assert not os.path.exists(resultsPath), f"Output directory already exists: {resultsPath}"
+
+    results = withMkdir(resultsPath)
     print(results)
 
     baselineMetrics = {}
