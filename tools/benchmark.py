@@ -9,6 +9,8 @@ import os
 import pathlib
 import json
 import concurrent.futures
+import platform
+import shutil
 from functools import partial
 import multiprocessing
 
@@ -126,7 +128,7 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
     mainBinary = dirs.results + "/main"
     if os.path.isfile(mainBinary) and runAndCapture("command -v shasum"):
         info["fingerprint"] = runAndCapture("shasum -a 256 " + mainBinary)
-    info["system"] = runAndCapture("uname -a")
+    info["system"] = tuple(platform.uname())
     if args.set: info["set"] = args.set
     if args.dataDir: info["dataDir"] = args.dataDir
 
@@ -692,7 +694,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         dstDir = os.path.abspath("{}/figures/{}".format(args.output, metricSet))
         pathlib.Path(dstDir).mkdir(parents=True, exist_ok=True)
         dst = "{}/{}.png".format(dstDir, runId)
-        subprocess.run(["cp", src, dst])
+        shutil.copy(src, dst)
 
     if ametrics and ametrics.get("failures"):
         print("Failures detected:", ametrics["failures"])
