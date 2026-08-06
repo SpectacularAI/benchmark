@@ -109,7 +109,7 @@ def computeVideoTimeSpan(dataJsonlPath):
     if span[1] < span[0]: return None
     return span
 
-def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
+def writeSharedInfoFile(args, dirs, startTime):
     def runAndCapture(cmd):
         return subprocess.run(cmd, stdout=subprocess.PIPE, shell=True).stdout.decode('utf-8').strip()
 
@@ -117,8 +117,7 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
     info = {
         "outputDirectory": dirs.results,
         "startTime": startTime,
-        "endTime": endTime,
-        "metrics": aggregateMetrics,
+        "status": "running",
         "metricSets": metricSets,
         "parameters": args.params,
     }
@@ -157,6 +156,15 @@ def writeSharedInfoFile(args, dirs, startTime, endTime, aggregateMetrics):
         f.write(json.dumps(info, indent=4, separators=(',', ': '), sort_keys=True))
 
     return infoJsonPath
+
+def updateSharedInfoFile(infoJsonPath, endTime, aggregateMetrics):
+    with open(infoJsonPath) as f:
+        info = json.load(f)
+    info["endTime"] = endTime
+    info["status"] = "finished"
+    info["metrics"] = aggregateMetrics
+    with open(infoJsonPath, "w") as f:
+        f.write(json.dumps(info, indent=4, separators=(',', ': '), sort_keys=True))
 
 # Track types recognized at the root.
 TRACK_KINDS = [ "groundTruth", "ARKit", "ARCore", "AREngine", "output" "OnDevice", "RealSense", "GPS", "RTKGPS", "externalPose" ]
@@ -601,6 +609,8 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     if setupFn:
         setupFn(args, dirs.results)
 
+    infoJsonPath = writeSharedInfoFile(args, dirs, startTime)
+
     if not args.skipBenchmark:
         if args.set:
             benchmarks = setupBenchmarkFromSetDescription(args, args.set)
@@ -679,7 +689,7 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         f.write(json.dumps(metrics, indent=4, separators=(',', ': '), sort_keys=True))
 
     # Needed by plotting below.
-    infoJsonPath = writeSharedInfoFile(args, dirs, startTime, endTime, ametrics)
+    updateSharedInfoFile(infoJsonPath, endTime, ametrics)
 
     print("---\nBenchmarks finished. Computing figures…")
     startTime = time.time()
