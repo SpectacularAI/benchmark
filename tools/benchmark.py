@@ -562,16 +562,24 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
     if args.skipBenchmark and not args.runId:
         raise Exception("-skipBenchmark requires -runId.")
 
+    setDefinition = None
+    if args.set:
+        setPath = findSetFile(args.setDir, args.set)
+        with open(setPath) as setFile:
+            setDefinition = json.load(setFile)
+
+    allowFailures = set()
+    if setDefinition and "allowFailures" in setDefinition:
+        if not isinstance(setDefinition["allowFailures"], list):
+            raise Exception("'allowFailures' in benchmark set must be a list")
+        allowFailures = set(setDefinition["allowFailures"])
+
     metric_set_val = args.metricSet
     if not metric_set_val:
         resolved_from_set = False
-        if args.set:
-            setPath = findSetFile(args.setDir, args.set)
-            with open(setPath) as setFile:
-                setDefinition = json.load(setFile)
-            if "metricSets" in setDefinition and isinstance(setDefinition["metricSets"], list):
-                metric_set_val = ",".join(setDefinition["metricSets"])
-                resolved_from_set = True
+        if setDefinition and "metricSets" in setDefinition and isinstance(setDefinition["metricSets"], list):
+            metric_set_val = ",".join(setDefinition["metricSets"])
+            resolved_from_set = True
         if not resolved_from_set:
             metric_set_val = DEFAULT_METRICS
     args.metricSet = metric_set_val
@@ -705,6 +713,9 @@ def benchmark(args, vioTrackingFn, setupFn=None, teardownFn=None):
         shutil.copy(src, dst)
 
     if ametrics and ametrics.get("failures"):
-        print("Failures detected:", ametrics["failures"])
-        return False
+        unallowedFailures = [f for f in ametrics["failures"] if f not in allowFailures]
+        if unallowedFailures:
+            print("Failures detected:", unallowedFailures)
+            return False
+        print("Allowed failures detected:", ametrics["failures"])
     return True
