@@ -412,8 +412,13 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
         if isSparse(track['position']): marker = "o"
         if postprocessed and ind == gtInd: marker = "o"
 
-        if track['position'].size == 0: continue
-        axis.plot(track['position'][:, ax1], track['position'][:, ax2], label=track['name'],
+        p = track['position']
+        if p.size == 0: continue
+        if track.get('resets'):
+            indices = np.unique(np.searchsorted(p[:, 0], track['resets'], side='right'))
+            indices = indices[(indices > 0) & (indices < len(p))]
+            p = np.insert(p, indices, np.nan, axis=0)
+        axis.plot(p[:, ax1], p[:, ax2], label=track['name'],
             color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
         plotLoopClosures(track, axis, ax1, ax2)
         plotResets(track, axis, ax1, ax2)
