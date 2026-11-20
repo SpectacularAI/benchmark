@@ -148,6 +148,7 @@ def colorByGlobalStatus(axis, globalStatus, startTime=0, maxTime=None):
         if s == "VIO": facecolor = "gray"
         elif s == "GNSS": facecolor = "red"
         elif s == "VPS": facecolor = "blue"
+        elif s == "DEAD_RECKONING": facecolor = "orange"
         else:
             assert(s == None)
             continue
@@ -392,6 +393,19 @@ def plotErrorOverTime(gt, vio, axis, z_axis, agls, includeLegend):
         lines2, labels2 = axis2.get_legend_handles_labels()
         axis2.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
 
+def deadReckoningMask(p, globalStatus):
+    isDr = np.zeros(len(p), dtype=bool)
+    if globalStatus is None or len(globalStatus) < 2:
+        return isDr
+    t = p[:, 0]
+    for i in range(len(globalStatus) - 1):
+        if globalStatus[i, 1] != "DEAD_RECKONING": continue
+        t0, t1 = globalStatus[i, 0], globalStatus[i + 1, 0]
+        inInterval = (t >= t0) & (t <= t1 if i == len(globalStatus) - 2 else t < t1)
+        if np.any(t[inInterval] > t0):
+            isDr |= inInterval
+    return isDr
+
 def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, fixOrigin, equalAxis=True):
     import matplotlib.pyplot as plt
     kwargsAlign = metricSetToAlignmentParams(Metric(metricSet))
@@ -418,8 +432,23 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
             indices = np.unique(np.searchsorted(p[:, 0], track['resets'], side='right'))
             indices = indices[(indices > 0) & (indices < len(p))]
             p = np.insert(p, indices, np.nan, axis=0)
-        axis.plot(p[:, ax1], p[:, ax2], label=track['name'],
-            color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
+        isDr = deadReckoningMask(p, track.get('globalStatus'))
+        if np.any(isDr):
+            if np.any(~isDr & ~np.isnan(p[:, 0])):
+                pNormal = p.copy()
+                pNormal[isDr] = np.nan
+                axis.plot(pNormal[:, ax1], pNormal[:, ax2], label=track['name'],
+                    color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
+            pDr = p.copy()
+            drConnected = isDr.copy()
+            drConnected[:-1] |= isDr[1:]
+            drConnected[1:] |= isDr[:-1]
+            pDr[~drConnected] = np.nan
+            axis.plot(pDr[:, ax1], pDr[:, ax2], label="DEAD_RECKONING",
+                color="orange", linewidth=args.lineWidth, marker=marker, markersize=3)
+        else:
+            axis.plot(p[:, ax1], p[:, ax2], label=track['name'],
+                color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
         plotLoopClosures(track, axis, ax1, ax2)
         plotResets(track, axis, ax1, ax2)
 
