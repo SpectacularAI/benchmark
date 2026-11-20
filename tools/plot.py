@@ -148,7 +148,7 @@ def colorByGlobalStatus(axis, globalStatus, startTime=0, maxTime=None):
         if s == "VIO": facecolor = "gray"
         elif s == "GNSS": facecolor = "red"
         elif s == "VPS": facecolor = "blue"
-        elif s == "DEAD_RECKONING": facecolor = "orange"
+        elif s == "DEAD_RECKONING": facecolor = "hotpink"
         else:
             assert(s == None)
             continue
@@ -445,7 +445,7 @@ def plot2dTracks(args, tracks, gtInd, axis, ax1, ax2, metricSet, postprocessed, 
             drConnected[1:] |= isDr[:-1]
             pDr[~drConnected] = np.nan
             axis.plot(pDr[:, ax1], pDr[:, ax2], label="DEAD_RECKONING",
-                color="orange", linewidth=args.lineWidth, marker=marker, markersize=3)
+                color="hotpink", linewidth=args.lineWidth * 2, linestyle="--", marker=marker, markersize=3)
         else:
             axis.plot(p[:, ax1], p[:, ax2], label=track['name'],
                 color=getColor(track['name']), linewidth=args.lineWidth, marker=marker, markersize=3)
