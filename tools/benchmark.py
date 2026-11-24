@@ -100,12 +100,10 @@ class Benchmark:
 def computeVideoTimeSpan(dataJsonlPath):
     if not os.path.exists(dataJsonlPath): return None
     span = None
-    with open(dataJsonlPath) as dataJsonlFile:
-        for line in dataJsonlFile:
-            o = json.loads(line)
-            if not "frames" in o or not "time" in o: continue
-            if not span: span = [o["time"], o["time"]]
-            span[1] = o["time"]
+    for o in readJsonl(dataJsonlPath):
+        if not "frames" in o or not "time" in o: continue
+        if not span: span = [o["time"], o["time"]]
+        span[1] = o["time"]
     if span[1] < span[0]: return None
     return span
 
@@ -230,13 +228,11 @@ def convertComparisonData(casePaths, metricSets, gnssConverter):
         datasets[kind].append(json)
 
     if os.path.exists(casePaths["input"]):
-        with open(casePaths["input"]) as f:
-            for line in f.readlines():
-                dataRow = json.loads(line)
-                if dataRow.get("frames") is not None:
-                    frameCount += 1
-                    continue
-                handleRow(dataRow)
+        for dataRow in readJsonl(casePaths["input"]):
+            if dataRow.get("frames") is not None:
+                frameCount += 1
+                continue
+            handleRow(dataRow)
     if os.path.exists(casePaths["inputGroundTruth"]):
         with open(casePaths["inputGroundTruth"]) as f:
             for line in f.readlines():
