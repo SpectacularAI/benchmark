@@ -30,6 +30,7 @@ def setupFn(args, outputDir):
 
 def tearDownFn(args, outputDir):
     existing = []
+    recording = []
     ran = []
     for x in os.walk(f"{outputDir}/vio-logs"):
         for filename in x[2]:
@@ -37,15 +38,25 @@ def tearDownFn(args, outputDir):
                 logMsg = f.read()
                 caseName = filename.rsplit('.', 1)[0]
                 if logMsg == "existing": existing.append(caseName)
+                elif logMsg == "recording": recording.append(caseName)
                 elif logMsg == "ran": ran.append(caseName)
                 else: print(f"Unexpected status {filename}: {logMsg}")
     print("")
     if existing: print("Used existing trajectories from 'output.jsonl' files for: " + ", ".join(existing))
+    if recording: print("Used recording-time trajectories from 'data.jsonl' files for: " + ", ".join(recording))
     if ran: print("Ran Spectacular AI SDK for: " + ", ".join(ran))
 
 def vioTrackingFn(args, benchmark, outputDir, outputFile, prefixCmd):
     outputJsonl = f"{benchmark.dir}/output.jsonl"
-    if os.path.exists(outputJsonl):
+    if args.useRecordingOutput:
+        dataJsonl = f"{benchmark.dir}/data.jsonl"
+        if os.path.exists(dataJsonl):
+            with open(dataJsonl) as fIn, open(outputFile, "w") as fOut:
+                for line in fIn:
+                    if "acceleration" in json.loads(line):
+                        fOut.write(line)
+        logMsg = "recording"
+    elif os.path.exists(outputJsonl):
         shutil.copyfile(outputJsonl, outputFile)
         logMsg = "existing"
     else:
