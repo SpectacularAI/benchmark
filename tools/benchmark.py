@@ -63,6 +63,7 @@ def getArgParser():
     parser.add_argument("-savePoseTrail", action="store_true") # Set automatically.
     parser.add_argument("-iterations", help="How many times benchmark is run", type=int, default=1)
     parser.add_argument("-simplePlots", help="Reduce clutter in plots", action="store_true")
+    parser.add_argument("-useRecordingOutput", help="Use recording-time VIO output from data.jsonl instead of running the SDK", action="store_true")
     return parser
 
 def readJsonl(filePath):
